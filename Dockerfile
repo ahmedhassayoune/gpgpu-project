@@ -1,5 +1,7 @@
 FROM nvidia/cuda:12.2.2-devel-ubuntu22.04
 
+ARG DEBIAN_FRONTEND=noninteractive
+
 RUN apt-get update && apt-get install -y \
     cmake \
     clang \
@@ -20,6 +22,5 @@ WORKDIR /gpgpu
 
 COPY . .
 
+RUN wget https://gstreamer.freedesktop.org/media/sintel_trailer-480p.webm
 RUN chmod +x build.sh
-
-CMD ["./build.sh"]

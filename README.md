@@ -1,8 +1,23 @@
+## Objectif
+
+Développer un plugin GStreamer capable de séparer le fond des objets mobiles dans des vidéos en temps réel, en utilisant des techniques de traitement d'image sur GPU pour optimiser les performances.
+
+**Approche générale :**
+Le traitement est basé sur l'analyse de chaque frame vidéo par rapport à une estimation du modèle de fond.
+Les différences entre chaque frame et le modèle de fond sont utilisées pour détecter les objets mobiles.
+
+**Étapes principales :**
+
+1. Estimation initiale du modèle de fond : Utilisation de la première frame comme estimation initiale du modèle de fond.
+2. Calcul du masque de changement (foreground/background) : Comparaison entre la frame actuelle et le modèle de fond pour détecter les changements.
+3. Filtrage et seuillage : Suppression du bruit et seuillage pour créer un masque binaire des objets en mouvement.
+4. Mise à jour du modèle de fond : Rafraîchissement périodique du modèle de fond pour s'adapter aux changements dans la scène.
+
 ## Compilation
 
-### Sur unr machine de l'école
+### Sur une machine de l'école
 
-**1.** S'authentifier sur une machine de l'école :
+1. S'authentifier sur une machine de l'école :
 
 ```sh
 # Se connecter à une machine et s'autentifier
@@ -10,23 +25,9 @@ ssh -X -p 2200[0-4] login@gpgpu.image.lrde.iaas.epita.fr
 kinit login
 aklog
 
-# Créer un dossier pour le projet à monter (NE FAIRE QU'UNE FOIS)
+# Cloner le projet dans l'afs (NE FAIRE QU'UNE FOIS)
 cd afs/
-mkdir gpgpu-project
-```
-
-**2.** Sur un autre terminal en local, monter le dossier du projet :
-
-```sh
-# Monter le repo git sur l'afs
-sshfs -o allow_other -p 2200[0-4] login@gpgpu.image.lrde.iaas.epita.fr:/path/to/afs/gpgpu-project path/to/git/project
-```
-
-**3.** Reprendre le terminal de l'étape 1 et se placer dans le dossier monté :
-
-```sh
-# Se mettre dans le dossier monté
-cd gpgpu-project
+git clone git@github.com:ahmedhassayoune/gpgpu-project.git && cd gpgpu-project
 
 # Creer un nouveau shell avec toutes les configuration et dépendances du projet
 nix-shell
@@ -35,11 +36,24 @@ nix-shell
 ./build.sh
 ```
 
+2. Sur un autre terminal en local, monter le dossier du projet :
+
+```sh
+# Créer un dossier pour monter le projet en local
+mkdir gpgpu-project-mount
+
+# Monter le repo git sur l'afs
+sshfs -o allow_other -p 2200[0-4] login@gpgpu.image.lrde.iaas.epita.fr:/path/to/afs/gpgpu-project gpgpu-project-mount
+```
+
+> Pour démonter le dossier en local après avoir fini :
+> `fusermount -u path/to/gpgpu-project`
+
 ### En local avec sa propre carte Nvidia
 
 ```sh
 docker build -t gpgpu-image .
-docker run --name=gpgpu -it --rm --gpus=all -v $(pwd):/gpgpu gpgpu-image
+docker run -it --gpus=all --name=gpgpu -v $(pwd):/gpgpu gpgpu-image sh
 
 # Dans le container build le projet
 ./build.sh
