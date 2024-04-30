@@ -1,3 +1,4 @@
 Etienne Reverchon <etienne.reverchon@epita.fr>
 Nicolae Istratii  <nicolae.istratii@epita.fr>
+Morgane Baizeau   <morgane.baizeau@epita.fr>
 Ahmed Hassayoune  <ahmed.hassayoune@epita.fr>
