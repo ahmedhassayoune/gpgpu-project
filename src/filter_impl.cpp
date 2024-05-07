@@ -13,16 +13,17 @@ extern "C" {
     {
         for (int y = 0; y < height; ++y)
         {
-            rgb* lineptr = (rgb*) (buffer + y * stride);
+            uint8_t* lineptr = (uint8_t*) (buffer + y * stride);
             for (int x = 0; x < width; ++x)
             {
-                lineptr[x].r = 0; // Back out red component
+                rgb* pxl = (rgb *) (lineptr + x * pixel_stride)
+                pxl.r = 0; // Back out red component
 
                 if (x < logo_width && y < logo_height)
                 {
                     float alpha = logo_data[y * logo_width + x] / 255.f;
-                    lineptr[x].g = uint8_t(alpha * lineptr[x].g + (1-alpha) * 255);
-                    lineptr[x].b = uint8_t(alpha * lineptr[x].b + (1-alpha) * 255);
+                    pxl.g = uint8_t(alpha * pxl.g + (1-alpha) * 255);
+                    pxl.b = uint8_t(alpha * pxl.b + (1-alpha) * 255);
 
                 }
             }
