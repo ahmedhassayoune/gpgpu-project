@@ -11,6 +11,8 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
+      with:
+        ssh-key: ${{secrets.SSH_BYPASS_BRANCH_PROTECTION}}
     - uses: DoozyX/clang-format-lint-action@v0.17
       with:
         source: './src'
