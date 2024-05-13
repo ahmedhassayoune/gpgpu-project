@@ -12,7 +12,7 @@ jobs:
     steps:
     - uses: actions/checkout@v4
       with:
-        ssh-key: ${{secrets.SSH_BYPASS_BRANCH_PROTECTION}}
+        ssh-key: ${{secrets.SSH_BYPASS_BRANCH_PROTECTIONN}}
     - uses: DoozyX/clang-format-lint-action@v0.17
       with:
         source: './src'
