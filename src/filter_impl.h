@@ -16,6 +16,8 @@ extern "C"
 
 #ifdef __cplusplus
 }
+
+/** Hysteresis Threshold **/
 struct pos
 {
   int x, y;
