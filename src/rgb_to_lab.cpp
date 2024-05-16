@@ -16,8 +16,9 @@ void rgbToXyz(double r, double g, double b, double& x, double& y, double& z) {
     x = r * 0.4124564 + g * 0.3575761 + b * 0.1804375;
     y = r * 0.2126729 + g * 0.7151522 + b * 0.0721750;
     z = r * 0.0193339 + g * 0.1191920 + b * 0.9503041;
-}
 
+    std::cout << "RGB -> XYZ: (" << r << ", " << g << ", " << b << ") -> (" << x << ", " << y << ", " << z << ")\n";
+}
 
 void xyzToLab(double x, double y, double z, LAB& lab) {
     x /= 95.047;
@@ -31,8 +32,9 @@ void xyzToLab(double x, double y, double z, LAB& lab) {
     lab.l = (116 * y) - 16;
     lab.a = 500 * (x - y);
     lab.b = 200 * (y - z);
-}
 
+    std::cout << "XYZ -> LAB: (" << x << ", " << y << ", " << z << ") -> (" << lab.l << ", " << lab.a << ", " << lab.b << ")\n";
+}
 
 double labDistance(const LAB& lab1, const LAB& lab2) {
     return sqrt(pow(lab1.l - lab2.l, 2) + pow(lab1.a - lab2.a, 2) + pow(lab1.b - lab2.b, 2));
