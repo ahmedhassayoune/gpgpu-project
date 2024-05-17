@@ -52,8 +52,11 @@ sshfs -o allow_other -p 2200[0-4] login@gpgpu.image.lrde.iaas.epita.fr:/path/to/
 ### En local avec sa propre carte Nvidia
 
 ```sh
+# -- If 1st time building and runnning image do this :
 docker build -t gpgpu-image .
 docker run -it --gpus=all --name=gpgpu -v $(pwd):/gpgpu gpgpu-image sh
+# -- Else do this :
+docker start -ai gpgpu
 
 # Dans le container build le projet
 ./build.sh
