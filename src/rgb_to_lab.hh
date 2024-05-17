@@ -16,6 +16,7 @@ struct LAB {
     double l, a, b;
 };
 
-void rgbToXyz(double r, double g, double b, double& x, double& y, double& z);
-void xyzToLab(double x, double y, double z, LAB& lab);
-double labDistance(const LAB& lab1, const LAB& lab2);
+
+void rgbToXyz(float r, float g, float b, float& x, float& y, float& z);
+void xyzToLab(float x, float y, float z, LAB& lab);
+float labDistance(const LAB& lab1, const LAB& lab2);
