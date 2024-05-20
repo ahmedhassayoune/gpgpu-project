@@ -121,7 +121,6 @@ extern "C"
         return;
 
     uint8_t B[512];
-    int batch_size = buffers_amount * pixel_stride;
 
     for (int yy = 0; yy < height; ++yy)
       {
@@ -131,32 +130,32 @@ extern "C"
             for (int ii = 0; ii < buffers_amount; ++ii)
               {
                 uint8_t* ptr = buffers[ii] + yy * stride + xx * pixel_stride;
-                int jj = ii * pixel_stride;
-                for (int kk = 0; kk < pixel_stride; ++kk)
+                int jj = ii * N_CHANNELS;
+                for (int kk = 0; kk < N_CHANNELS; ++kk)
                   B[jj + kk] = ptr[kk];
               }
 
             // the median is computed for each channel separately
 
             // each channel is sorted in order to find its mid value
-            for (int ii = 0; ii < pixel_stride; ++ii)
-              _selection_sort(B, ii, batch_size, pixel_stride);
+            for (int ii = 0; ii < N_CHANNELS; ++ii)
+              _selection_sort(B, ii, buffers_amount * N_CHANNELS, N_CHANNELS);
 
             // select mid
             uint8_t* outptr = out + yy * stride + xx * pixel_stride;
             if (buffers_amount % 2 == 0)
               {
-                for (int ii = 0; ii < pixel_stride; ++ii)
+                for (int ii = 0; ii < N_CHANNELS; ++ii)
                   {
-                    int a = B[(buffers_amount / 2) * pixel_stride + ii];
-                    int b = B[(buffers_amount / 2 - 1) * pixel_stride + ii];
+                    int a = B[(buffers_amount / 2) * N_CHANNELS + ii];
+                    int b = B[(buffers_amount / 2 - 1) * N_CHANNELS + ii];
                     outptr[ii] = (uint8_t)((a + b) / 2);
                   }
               }
             else
               {
-                for (int ii = 0; ii < pixel_stride; ++ii)
-                  outptr[ii] = B[(buffers_amount / 2) * pixel_stride + ii];
+                for (int ii = 0; ii < N_CHANNELS; ++ii)
+                  outptr[ii] = B[(buffers_amount / 2) * N_CHANNELS + ii];
               }
           }
       }
