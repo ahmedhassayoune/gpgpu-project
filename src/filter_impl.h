@@ -14,6 +14,15 @@ extern "C"
                    int plane_stride,
                    int pixel_stride);
 
+#define _BE_FSIGN                                                              \
+  uint8_t **buffers, int buffers_amount, int width, int height, int stride,    \
+    int pixel_stride, uint8_t *out
+
+  void estimate_background_mean(_BE_FSIGN);
+  void estimate_background_median(_BE_FSIGN);
+
+#undef _BE_FSIGN
+
 #ifdef __cplusplus
 }
 
