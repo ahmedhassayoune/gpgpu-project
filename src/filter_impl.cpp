@@ -4,6 +4,8 @@
 #include <thread>
 #include "logo.h"
 
+#define N_CHANNELS 3
+
 struct rgb
 {
   uint8_t r, g, b;
@@ -58,28 +60,26 @@ extern "C"
       if (!buffers[ii])
         return;
 
-    // not the most cache efficient way of doing this
-    // at most 16 channels are supported (which is surely, more than enough)
-    int sums[16] = {0};
+    int sums[N_CHANNELS] = {0};
 
     for (int yy = 0; yy < height; ++yy)
       {
         for (int xx = 0; xx < width; ++xx)
           {
-            for (int ii = 0; ii < pixel_stride; ++ii)
+            for (int ii = 0; ii < N_CHANNELS; ++ii)
               sums[ii] = 0;
 
             // compute sums for each channel
             for (int ii = 0; ii < buffers_amount; ++ii)
               {
                 uint8_t* ptr = buffers[ii] + yy * stride + xx * pixel_stride;
-                for (int jj = 0; jj < pixel_stride; ++jj)
+                for (int jj = 0; jj < N_CHANNELS; ++jj)
                   sums[jj] += ptr[jj];
               }
 
             // compute mean for each channel
             uint8_t* outptr = out + yy * stride + xx * pixel_stride;
-            for (int ii = 0; ii < pixel_stride; ++ii)
+            for (int ii = 0; ii < N_CHANNELS; ++ii)
               outptr[ii] = (uint8_t)(sums[ii] / buffers_amount);
           }
       }
