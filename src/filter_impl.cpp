@@ -86,7 +86,7 @@ extern "C"
       }
   }
 
-  void _selection_sort(uint8_t* bytes, int start, int end, int step)
+  static void _selection_sort(uint8_t* bytes, int start, int end, int step)
   {
     for (int ii = start; ii + step < end; ii += step)
       {
