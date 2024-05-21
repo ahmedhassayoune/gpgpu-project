@@ -16,6 +16,21 @@ extern "C"
 
 #ifdef __cplusplus
 }
+#endif
+
+#ifdef __cplusplus
+/** Conversion from RGB to LAB **/
+struct LAB
+{
+  float l, a, b;
+};
+
+void rgb_to_lab(uint8_t* reference_buffer,
+                uint8_t* buffer,
+                int width,
+                int height,
+                int stride,
+                int pixel_stride);
 
 /** Hysteresis Threshold **/
 struct pos
