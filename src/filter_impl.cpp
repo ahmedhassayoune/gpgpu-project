@@ -326,3 +326,36 @@ void estimate_background_median(uint8_t** buffers,
         }
     }
 }
+
+//******************************************************
+//**                                                  **
+//**                Apply Masking                     **
+//**                                                  **
+//******************************************************
+
+void apply_masking(uint8_t* buffer,
+                   int width,
+                   int height,
+                   int stride,
+                   int pixel_stride,
+                   uint8_t* mask)
+{
+  if (!buffer || !mask)
+    return;
+
+  for (int yy = 0; yy < height; ++yy)
+    {
+      uint8_t* in_lineptr = buffer + yy * stride;
+      uint8_t* mask_lineptr = mask + yy * stride;
+
+      for (int xx = 0; xx < width; ++xx)
+        {
+          rgb* in_pixelptr = (rgb*)(in_lineptr + xx * pixel_stride);
+          rgb* mask_pixelptr = (rgb*)(mask_lineptr + xx * pixel_stride);
+          int red = in_pixelptr->r;
+          red = red + (mask_pixelptr->r > 0) * red / 2;
+          red = red > 0xff ? 0xff : red;
+          in_pixelptr->r = (uint8_t)(red);
+        }
+    }
+}

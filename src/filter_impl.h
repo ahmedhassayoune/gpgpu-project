@@ -49,4 +49,12 @@ void estimate_background_mean(_BE_FSIGN);
 void estimate_background_median(_BE_FSIGN);
 
 #  undef _BE_FSIGN
+
+void apply_masking(uint8_t* buffer,
+                   int width,
+                   int height,
+                   int stride,
+                   int pixel_stride,
+                   uint8_t* mask);
+
 #endif
