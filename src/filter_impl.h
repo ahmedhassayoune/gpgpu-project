@@ -40,4 +40,12 @@ void apply_hysteresis_threshold(uint8_t* buffer,
                                 int pixel_stride,
                                 uint8_t low_threshold,
                                 uint8_t high_threshold);
+
+void apply_masking(uint8_t* buffer,
+                   int width,
+                   int height,
+                   int stride,
+                   int pixel_stride,
+                   uint8_t* mask);
+
 #endif
