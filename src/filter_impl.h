@@ -56,4 +56,20 @@ void apply_hysteresis_threshold(uint8_t* buffer,
                                 uint8_t low_threshold,
                                 uint8_t high_threshold);
 
+#  define _BE_FSIGN                                                            \
+    uint8_t **buffers, int buffers_amount, int width, int height, int stride,  \
+      int pixel_stride, uint8_t *out
+
+void estimate_background_mean(_BE_FSIGN);
+void estimate_background_median(_BE_FSIGN);
+
+#  undef _BE_FSIGN
+
+void apply_masking(uint8_t* buffer,
+                   int width,
+                   int height,
+                   int stride,
+                   int pixel_stride,
+                   uint8_t* mask);
+
 #endif
