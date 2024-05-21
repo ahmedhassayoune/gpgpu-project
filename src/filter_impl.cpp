@@ -50,13 +50,13 @@ extern "C"
 //**                                                  **
 //******************************************************
 
-float gamma_correct(float channel)
+static float gamma_correct(float channel)
 {
   return (channel > 0.04045f) ? powf((channel + 0.055f) / 1.055f, 2.4f)
                               : channel / 12.92f;
 }
 
-void rgbToXyz(float r, float g, float b, float& x, float& y, float& z)
+static void rgbToXyz(float r, float g, float b, float& x, float& y, float& z)
 {
   const float D65_XYZ[9] = {0.412453f, 0.357580f, 0.180423f,
                             0.212671f, 0.715160f, 0.072169f,
@@ -78,7 +78,7 @@ void rgbToXyz(float r, float g, float b, float& x, float& y, float& z)
   z = r * D65_XYZ[6] + g * D65_XYZ[7] + b * D65_XYZ[8];
 }
 
-void xyzToLab(float x, float y, float z, float& l, float& a, float& b)
+static void xyzToLab(float x, float y, float z, float& l, float& a, float& b)
 {
   const float D65_Xn = 0.95047f;
   const float D65_Yn = 1.00000f;
@@ -103,7 +103,7 @@ void xyzToLab(float x, float y, float z, float& l, float& a, float& b)
   b = 200.0f * (fy - fz);
 }
 
-float labDistance(const LAB& lab1, const LAB& lab2)
+static float labDistance(const LAB& lab1, const LAB& lab2)
 {
   return sqrtf(powf(lab1.l - lab2.l, 2) + powf(lab1.a - lab2.a, 2)
                + powf(lab1.b - lab2.b, 2));
@@ -116,8 +116,6 @@ void rgb_to_lab(uint8_t* reference_buffer,
                 int stride,
                 int pixel_stride)
 {
-  LAB referenceLab = {50.0f, 0.0f,
-                      0.0f}; // Example reference color in Lab space
   float* array_distance = new float[width * height];
 
   // Step 1 - Fill distance array
