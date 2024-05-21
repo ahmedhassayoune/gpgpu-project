@@ -192,14 +192,18 @@ void rgb_to_lab(uint8_t* reference_buffer,
 //**             Morphological Opening                **
 //**                                                  **
 //******************************************************
-static void min_assign(rgb *lhs, rgb * rhs)
+static inline void min_assign(rgb *lhs, rgb * rhs)
 {
-    *lhs = rgb { .r = std::min(lhs->r, rhs->r), .g = std::min(lhs->g, rhs->g), .b = std::min(lhs->b, rhs->b)};
+  lhs->r = std::min(lhs->r, rhs->r);
+  lhs->g = std::min(lhs->g, rhs->g);
+  lhs->b = std::min(lhs->b, rhs->b);
 }
 
-static void max_assign(rgb *lhs, rgb * rhs)
+static inline void max_assign(rgb *lhs, rgb * rhs)
 {
-    *lhs = rgb { .r = std::max(lhs->r, rhs->r), .g = std::max(lhs->g, rhs->g), .b = std::max(lhs->b, rhs->b)};
+  lhs->r = std::max(lhs->r, rhs->r);
+  lhs->g = std::max(lhs->g, rhs->g);
+  lhs->b = std::max(lhs->b, rhs->b);
 }
 
 void erosion_impl(uint8_t* input, uint8_t* output, int width, int height, int stride, int pixel_stride){
