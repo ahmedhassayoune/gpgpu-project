@@ -343,7 +343,7 @@ void morphology_impl(uint8_t* input, uint8_t* output, int width, int height, int
 
 void opening_impl_inplace(uint8_t* buffer, int width, int height, int stride, int pixel_stride)
     {
-    uint8_t* other_buffer = (uint8_t*) malloc(width * stride);
+    uint8_t* other_buffer = (uint8_t*) malloc(height * stride);
     // i ignore potential malloc failure because i can't be bothered
 
     morphology_impl(buffer, other_buffer, width, height, stride, pixel_stride, EROSION);
