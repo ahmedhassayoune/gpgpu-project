@@ -184,6 +184,177 @@ void rgb_to_lab(uint8_t* reference_buffer,
   delete[] array_distance;
 }
 
+
+
+
+//******************************************************
+//**                                                  **
+//**             Morphological Opening                **
+//**                                                  **
+//******************************************************
+static inline void min_assign(rgb *lhs, rgb * rhs)
+{
+  lhs->r = std::min(lhs->r, rhs->r);
+  lhs->g = std::min(lhs->g, rhs->g);
+  lhs->b = std::min(lhs->b, rhs->b);
+}
+
+static inline void max_assign(rgb *lhs, rgb * rhs)
+{
+  lhs->r = std::max(lhs->r, rhs->r);
+  lhs->g = std::max(lhs->g, rhs->g);
+  lhs->b = std::max(lhs->b, rhs->b);
+}
+
+enum op_type {
+  EROSION,
+  DILATION
+};
+
+void morphology_impl(uint8_t* input, uint8_t* output, int width, int height, int stride, int pixel_stride, op_type op){
+    // top line (1/7)
+    for (int y = 0; y < height && y < 3; ++y)
+    {
+        uint8_t* output_lineptr = (uint8_t*) (output + y * stride);
+        for (int x = 0; x < width; ++x)
+        {
+            *(rgb *) (output_lineptr + x * pixel_stride) = (op == EROSION) 
+                    ? rgb { .r = 255, .g = 255, .b = 255 } 
+                    : rgb { .r = 0, .g = 0, .b = 0 };
+        }
+    }
+
+    for (int y = 3; y < height; ++y)
+    {
+        uint8_t* input_lineptr = (uint8_t*) (input + (y - 3) * stride);
+        uint8_t* output_lineptr = (uint8_t*) (output + y * stride);
+        for (int x = 0; x < width; ++x)
+        {
+            *(rgb *) (output_lineptr + x * pixel_stride) = *(rgb *) (input_lineptr + x * pixel_stride);
+        }
+    }
+
+    //second and third lines (3/7)
+    for (int i = 2; i > 0; --i)
+    {
+        for (int y = i; y < height; ++y)
+        {
+            uint8_t* input_lineptr = (uint8_t*) (input + (y - i) * stride);
+            uint8_t* output_lineptr = (uint8_t*) (output + y * stride);
+            for (int x = 0; x < width; ++x)
+            {
+                int min = x < 2 ? 0 : x -2;
+                int max = std::min(x + 3, width);
+                for (int j = min; j < max; j++)
+                {
+                    if (op == EROSION) {
+                        min_assign(
+                            (rgb *) (output_lineptr + x * pixel_stride), 
+                            (rgb *) (input_lineptr + j * pixel_stride)
+                        );
+                    } else {
+                        max_assign(
+                            (rgb *) (output_lineptr + x * pixel_stride), 
+                            (rgb *) (input_lineptr + j * pixel_stride)
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    //middle line (4/7)
+    for (int y = 0; y < height; ++y)
+    {
+        uint8_t* input_lineptr = (uint8_t*) (input + y * stride);
+        uint8_t* output_lineptr = (uint8_t*) (output + y * stride);
+        for (int x = 0; x < width; ++x)
+        {
+            int min = x < 3 ? 0 : x -3;
+            int max = std::min(x + 4, width);
+            for (int j = min; j < max; j++)
+            {
+                if (op == EROSION) {
+                    min_assign(
+                        (rgb *) (output_lineptr + x * pixel_stride), 
+                        (rgb *) (input_lineptr + j * pixel_stride)
+                    );
+                } else {
+                    max_assign(
+                        (rgb *) (output_lineptr + x * pixel_stride), 
+                        (rgb *) (input_lineptr + j * pixel_stride)
+                    );
+                }
+            }
+        }
+    }
+
+    //fifth and sixth lines (3/7)
+    for (int i = 1; i < 3; ++i)
+    {
+        for (int y = 0; y + i  < height; ++y)
+        {
+            uint8_t* input_lineptr = (uint8_t*) (input + (y + i) * stride);
+            uint8_t* output_lineptr = (uint8_t*) (output + y * stride);
+            for (int x = 0; x < width; ++x)
+            {
+                int min = x < 2 ? 0 : x -2;
+                int max = std::min(x + 3, width);
+                for (int j = min; j < max; j++)
+                {
+                    if (op == EROSION) {
+                        min_assign(
+                            (rgb *) (output_lineptr + x * pixel_stride), 
+                            (rgb *) (input_lineptr + j * pixel_stride)
+                        );
+                    } else {
+                        max_assign(
+                            (rgb *) (output_lineptr + x * pixel_stride), 
+                            (rgb *) (input_lineptr + j * pixel_stride)
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    // bottom line (7/7)
+    for (int y = 0; y + 3 < height; ++y)
+    {
+        uint8_t* input_lineptr = (uint8_t*) (input + (y + 3) * stride);
+        uint8_t* output_lineptr = (uint8_t*) (output + y * stride);
+        for (int x = 0; x < width; ++x)
+        {
+            if (op == EROSION) {
+                min_assign(
+                    (rgb *) (output_lineptr + x * pixel_stride),
+                    (rgb *) (input_lineptr + x * pixel_stride)
+                );
+            } else {
+                max_assign(
+                    (rgb *) (output_lineptr + x * pixel_stride), 
+                    (rgb *) (input_lineptr + x * pixel_stride)
+                );
+            }
+        }
+    }
+}
+
+
+void opening_impl_inplace(uint8_t* buffer, int width, int height, int stride, int pixel_stride)
+    {
+    uint8_t* other_buffer = (uint8_t*) malloc(height * stride);
+    // i ignore potential malloc failure because i can't be bothered
+
+    morphology_impl(buffer, other_buffer, width, height, stride, pixel_stride, EROSION);
+
+    morphology_impl(other_buffer, buffer, width, height, stride, pixel_stride, DILATION);
+   
+    free(other_buffer);
+}
+
+
+
 //******************************************************
 //**                                                  **
 //**                Hysteresis Threshold              **
