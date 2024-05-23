@@ -38,6 +38,16 @@ void rgb_to_lab(uint8_t* reference_buffer,
                 int stride,
                 int pixel_stride);
 
+/** 
+ * applies a morphological opening (3-disk) 
+ * on each rgb channel independently 
+**/
+void opening_impl_inplace(uint8_t* buffer,
+                          int width,
+                          int height,
+                          int stride,
+                          int pixel_stride);
+
 /** Hysteresis Threshold **/
 void apply_hysteresis_threshold(uint8_t* buffer,
                                 int width,
