@@ -13,6 +13,49 @@ struct rgb
   uint8_t r, g, b;
 };
 
+struct LAB
+{
+  float l, a, b;
+};
+
+struct pos
+{
+  int x, y;
+};
+
+struct Queue
+{
+  pos* buffer_pos;
+  int front = 0;
+  int rear = 0;
+};
+
+enum op_type
+{
+  EROSION,
+  DILATION
+};
+
+/* prototypes */
+static void _selection_sort(uint8_t* bytes, int start, int end, int step);
+
+static void rgbToXyz(float r, float g, float b, float& x, float& y, float& z);
+static void xyzToLab(float x, float y, float z, float& l, float& a, float& b);
+
+static inline void min_assign(rgb* lhs, rgb* rhs);
+static inline void max_assign(rgb* lhs, rgb* rhs);
+static void morphology_impl(uint8_t* input,
+                            uint8_t* output,
+                            int width,
+                            int height,
+                            int stride,
+                            int pixel_stride,
+                            op_type op);
+
+static void enqueue(Queue& q, int x, int y);
+static pos dequeue(Queue& q);
+static bool is_empty(Queue& q);
+
 extern "C"
 {
   void filter_impl(uint8_t* buffer,
@@ -45,18 +88,134 @@ extern "C"
     }
   }
 }
+//******************************************************
+//**                                                  **
+//**               Background Estimation              **
+//**                                                  **
+//******************************************************
+
+void estimate_background_mean(uint8_t** buffers,
+                              int buffers_amount,
+                              int width,
+                              int height,
+                              int stride,
+                              int pixel_stride,
+                              uint8_t* out)
+{
+  // It is expected `out` has same stride values
+
+  if (!buffers || !out)
+    return;
+
+  for (int ii = 0; ii < buffers_amount; ++ii)
+    if (!buffers[ii])
+      return;
+
+  int sums[N_CHANNELS] = {0};
+
+  for (int yy = 0; yy < height; ++yy)
+    {
+      for (int xx = 0; xx < width; ++xx)
+        {
+          for (int ii = 0; ii < N_CHANNELS; ++ii)
+            sums[ii] = 0;
+
+          // compute sums for each channel
+          for (int ii = 0; ii < buffers_amount; ++ii)
+            {
+              uint8_t* ptr = buffers[ii] + yy * stride + xx * pixel_stride;
+              for (int jj = 0; jj < N_CHANNELS; ++jj)
+                sums[jj] += ptr[jj];
+            }
+
+          // compute mean for each channel
+          uint8_t* outptr = out + yy * stride + xx * pixel_stride;
+          for (int ii = 0; ii < N_CHANNELS; ++ii)
+            outptr[ii] = (uint8_t)(sums[ii] / buffers_amount);
+        }
+    }
+}
+
+static void _selection_sort(uint8_t* bytes, int start, int end, int step)
+{
+  for (int ii = start; ii + step < end; ii += step)
+    {
+      int jj = ii;
+
+      for (int kk = jj + step; kk < end; kk += step)
+        if (bytes[jj] > bytes[kk])
+          jj = kk;
+
+      if (jj != ii)
+        {
+          uint8_t tmp = bytes[jj];
+          bytes[jj] = bytes[ii];
+          bytes[ii] = tmp;
+        }
+    }
+}
+
+void estimate_background_median(uint8_t** buffers,
+                                int buffers_amount,
+                                int width,
+                                int height,
+                                int stride,
+                                int pixel_stride,
+                                uint8_t* out)
+{
+  if (!buffers || !out)
+    return;
+
+  for (int ii = 0; ii < buffers_amount; ++ii)
+    if (!buffers[ii])
+      return;
+
+  uint8_t B[512];
+
+  for (int yy = 0; yy < height; ++yy)
+    {
+      for (int xx = 0; xx < width; ++xx)
+        {
+          // for each buffer store pixel at (yy, xx)
+          for (int ii = 0; ii < buffers_amount; ++ii)
+            {
+              uint8_t* ptr = buffers[ii] + yy * stride + xx * pixel_stride;
+              int jj = ii * N_CHANNELS;
+              for (int kk = 0; kk < N_CHANNELS; ++kk)
+                B[jj + kk] = ptr[kk];
+            }
+
+          // the median is computed for each channel separately
+
+          // each channel is sorted in order to find its mid value
+          for (int ii = 0; ii < N_CHANNELS; ++ii)
+            _selection_sort(B, ii, buffers_amount * N_CHANNELS, N_CHANNELS);
+
+          // select mid
+          uint8_t* outptr = out + yy * stride + xx * pixel_stride;
+          if (buffers_amount % 2 == 0)
+            {
+              for (int ii = 0; ii < N_CHANNELS; ++ii)
+                {
+                  int a = B[(buffers_amount / 2) * N_CHANNELS + ii];
+                  int b = B[(buffers_amount / 2 - 1) * N_CHANNELS + ii];
+                  outptr[ii] = (uint8_t)((a + b) / 2);
+                }
+            }
+          else
+            {
+              for (int ii = 0; ii < N_CHANNELS; ++ii)
+                outptr[ii] = B[(buffers_amount / 2) * N_CHANNELS + ii];
+            }
+        }
+    }
+}
 
 //******************************************************
 //**                                                  **
 //**           Conversion from RGB to LAB             **
 //**                                                  **
 //******************************************************
-
-static float gamma_correct(float channel)
-{
-  return (channel > 0.04045f) ? powf((channel + 0.055f) / 1.055f, 2.4f)
-                              : channel / 12.92f;
-}
 
 static void rgbToXyz(float r, float g, float b, float& x, float& y, float& z)
 {
@@ -69,10 +228,13 @@ static void rgbToXyz(float r, float g, float b, float& x, float& y, float& z)
   g = g / 255.0f;
   b = b / 255.0f;
 
-  // Apply sRGB gamma correction
-  r = gamma_correct(r);
-  g = gamma_correct(g);
-  b = gamma_correct(b);
+// Apply sRGB gamma correction
+#define GAMMA_CORRECT(x)                                                       \
+  ((x) > 0.04045f ? powf(((x) + 0.055f) / 1.055f, 2.4f) : (x) / 12.92f)
+  r = GAMMA_CORRECT(r);
+  g = GAMMA_CORRECT(g);
+  b = GAMMA_CORRECT(b);
+#undef GAMMA_CORRECT
 
   // Convert to XYZ using the D65 illuminant
   x = r * D65_XYZ[0] + g * D65_XYZ[1] + b * D65_XYZ[2];
@@ -91,24 +253,18 @@ static void xyzToLab(float x, float y, float z, float& l, float& a, float& b)
   y /= D65_Yn;
   z /= D65_Zn;
 
-  // Apply the nonlinear transformation
-  float fx =
-    (x > 0.008856f) ? powf(x, 1.0f / 3.0f) : (7.787f * x + 16.0f / 116.0f);
-  float fy =
-    (y > 0.008856f) ? powf(y, 1.0f / 3.0f) : (7.787f * y + 16.0f / 116.0f);
-  float fz =
-    (z > 0.008856f) ? powf(z, 1.0f / 3.0f) : (7.787f * z + 16.0f / 116.0f);
+// Apply the nonlinear transformation
+#define NONLINEAR(x)                                                           \
+  ((x) > 0.008856f ? powf(x, 1.0f / 3.0f) : (7.787f * x + 16.0f / 116.0f))
+  float fx = NONLINEAR(x);
+  float fy = NONLINEAR(x);
+  float fz = NONLINEAR(x);
+#undef NONLINEAR
 
   // Convert to Lab
   l = (116.0f * fy) - 16.0f;
   a = 500.0f * (fx - fy);
   b = 200.0f * (fy - fz);
-}
-
-static float labDistance(const LAB& lab1, const LAB& lab2)
-{
-  return sqrtf(powf(lab1.l - lab2.l, 2) + powf(lab1.a - lab2.a, 2)
-               + powf(lab1.b - lab2.b, 2));
 }
 
 void rgb_to_lab(uint8_t* reference_buffer,
@@ -156,8 +312,12 @@ void rgb_to_lab(uint8_t* reference_buffer,
 
           LAB currentLab = {L_, A_, B_};
 
-          // Compute distance between both pixels
-          float distance = labDistance(currentLab, referenceLab);
+// Compute distance between both pixels
+#define LAB_DISTANCE(lab1, lab2)                                               \
+  (sqrtf(powf((lab1).l - (lab2).l, 2) + powf((lab1).a - (lab2).a, 2)           \
+         + powf((lab1).b - (lab2).b, 2)))
+          float distance = LAB_DISTANCE(currentLab, referenceLab);
+#undef LAB_DISTANCE
           array_distance[y * width + x] = distance;
           max_distance = std::max(max_distance, distance);
         }
@@ -203,19 +363,13 @@ static inline void max_assign(rgb* lhs, rgb* rhs)
   lhs->b = std::max(lhs->b, rhs->b);
 }
 
-enum op_type
-{
-  EROSION,
-  DILATION
-};
-
-void morphology_impl(uint8_t* input,
-                     uint8_t* output,
-                     int width,
-                     int height,
-                     int stride,
-                     int pixel_stride,
-                     op_type op)
+static void morphology_impl(uint8_t* input,
+                            uint8_t* output,
+                            int width,
+                            int height,
+                            int stride,
+                            int pixel_stride,
+                            op_type op)
 {
   // top line (1/7)
   for (int y = 0; y < height && y < 3; ++y)
@@ -373,7 +527,7 @@ void opening_impl_inplace(uint8_t* buffer,
  * @param x The x-coordinate of the position to enqueue.
  * @param y The y-coordinate of the position to enqueue.
  */
-void enqueue(Queue& q, int x, int y)
+static void enqueue(Queue& q, int x, int y)
 {
   q.buffer_pos[q.rear].x = x;
   q.buffer_pos[q.rear].y = y;
@@ -386,7 +540,7 @@ void enqueue(Queue& q, int x, int y)
  * @param q Reference to the Queue structure.
  * @return The dequeued position.
  */
-pos dequeue(Queue& q)
+static pos dequeue(Queue& q)
 {
   if (q.front == q.rear)
     {
@@ -403,7 +557,7 @@ pos dequeue(Queue& q)
  * @param q Reference to the Queue structure.
  * @return True if the queue is empty, otherwise false.
  */
-bool is_empty(Queue& q) { return q.front == q.rear; }
+static bool is_empty(Queue& q) { return q.front == q.rear; }
 
 /**
  * Apply hysteresis thresholding to the input image buffer.
@@ -435,7 +589,7 @@ void apply_hysteresis_threshold(uint8_t* buffer,
     }
 
   // Init queue
-  Queue q;
+  Queue q = {nullptr, 0, 0};
   q.buffer_pos = (pos*)malloc(width * height * sizeof(pos));
 
   // Enqueue pixels with intensity greater than high threshold
@@ -517,129 +671,6 @@ void apply_hysteresis_threshold(uint8_t* buffer,
     }
 
   free(q.buffer_pos);
-}
-
-//******************************************************
-//**                                                  **
-//**               Background Estimation              **
-//**                                                  **
-//******************************************************
-
-void estimate_background_mean(uint8_t** buffers,
-                              int buffers_amount,
-                              int width,
-                              int height,
-                              int stride,
-                              int pixel_stride,
-                              uint8_t* out)
-{
-  // It is expected `out` has same stride values
-
-  if (!buffers || !out)
-    return;
-
-  for (int ii = 0; ii < buffers_amount; ++ii)
-    if (!buffers[ii])
-      return;
-
-  int sums[N_CHANNELS] = {0};
-
-  for (int yy = 0; yy < height; ++yy)
-    {
-      for (int xx = 0; xx < width; ++xx)
-        {
-          for (int ii = 0; ii < N_CHANNELS; ++ii)
-            sums[ii] = 0;
-
-          // compute sums for each channel
-          for (int ii = 0; ii < buffers_amount; ++ii)
-            {
-              uint8_t* ptr = buffers[ii] + yy * stride + xx * pixel_stride;
-              for (int jj = 0; jj < N_CHANNELS; ++jj)
-                sums[jj] += ptr[jj];
-            }
-
-          // compute mean for each channel
-          uint8_t* outptr = out + yy * stride + xx * pixel_stride;
-          for (int ii = 0; ii < N_CHANNELS; ++ii)
-            outptr[ii] = (uint8_t)(sums[ii] / buffers_amount);
-        }
-    }
-}
-
-static void _selection_sort(uint8_t* bytes, int start, int end, int step)
-{
-  for (int ii = start; ii + step < end; ii += step)
-    {
-      int jj = ii;
-
-      for (int kk = jj + step; kk < end; kk += step)
-        if (bytes[jj] > bytes[kk])
-          jj = kk;
-
-      if (jj != ii)
-        {
-          uint8_t tmp = bytes[jj];
-          bytes[jj] = bytes[ii];
-          bytes[ii] = tmp;
-        }
-    }
-}
-
-void estimate_background_median(uint8_t** buffers,
-                                int buffers_amount,
-                                int width,
-                                int height,
-                                int stride,
-                                int pixel_stride,
-                                uint8_t* out)
-{
-  if (!buffers || !out)
-    return;
-
-  for (int ii = 0; ii < buffers_amount; ++ii)
-    if (!buffers[ii])
-      return;
-
-  uint8_t B[512];
-
-  for (int yy = 0; yy < height; ++yy)
-    {
-      for (int xx = 0; xx < width; ++xx)
-        {
-          // for each buffer store pixel at (yy, xx)
-          for (int ii = 0; ii < buffers_amount; ++ii)
-            {
-              uint8_t* ptr = buffers[ii] + yy * stride + xx * pixel_stride;
-              int jj = ii * N_CHANNELS;
-              for (int kk = 0; kk < N_CHANNELS; ++kk)
-                B[jj + kk] = ptr[kk];
-            }
-
-          // the median is computed for each channel separately
-
-          // each channel is sorted in order to find its mid value
-          for (int ii = 0; ii < N_CHANNELS; ++ii)
-            _selection_sort(B, ii, buffers_amount * N_CHANNELS, N_CHANNELS);
-
-          // select mid
-          uint8_t* outptr = out + yy * stride + xx * pixel_stride;
-          if (buffers_amount % 2 == 0)
-            {
-              for (int ii = 0; ii < N_CHANNELS; ++ii)
-                {
-                  int a = B[(buffers_amount / 2) * N_CHANNELS + ii];
-                  int b = B[(buffers_amount / 2 - 1) * N_CHANNELS + ii];
-                  outptr[ii] = (uint8_t)((a + b) / 2);
-                }
-            }
-          else
-            {
-              for (int ii = 0; ii < N_CHANNELS; ++ii)
-                outptr[ii] = B[(buffers_amount / 2) * N_CHANNELS + ii];
-            }
-        }
-    }
 }
 
 //******************************************************
