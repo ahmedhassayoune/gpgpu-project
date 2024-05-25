@@ -59,6 +59,33 @@ remove_red_channel_inp(std::byte* buffer, int width, int height, int stride)
     }
 }
 
+//******************************************************
+//**                                                  **
+//**                Apply Masking                     **
+//**                                                  **
+//******************************************************
+
+__global__ void apply_masking(uint8_t* buffer,
+                              int width,
+                              int height,
+                              int stride,
+                              int pixel_stride,
+                              uint8_t* mask)
+{
+  int xx = blockIdx.x * blockDim.x + threadIdx.x;
+  int yy = blockIdx.y * blockDim.y + threadIdx.y;
+
+  if (xx >= width || yy >= height)
+    return;
+
+  rgb* ipptr = (rgb*)(buffer + yy * stride + xx * pixel_stride);
+  rgb* mpptr = (rgb*)(mask + yy * stride + xx * pixel_stride);
+  int red = ipptr->r;
+  red = red + (mpptr->r > 0) * red / 2;
+  red = red > 0xff ? 0xff : red;
+  ipptr->r = (uint8_t)(red);
+}
+
 namespace
 {
   void load_logo()
