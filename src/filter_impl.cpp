@@ -1,10 +1,7 @@
 #include "filter_impl.h"
 
 #include <chrono>
-#include <fstream>
 #include <iostream>
-#include <sstream>
-#include <string>
 #include <thread>
 #include <math.h>
 #include "logo.h"
@@ -64,50 +61,14 @@ static bool is_empty(Queue& q);
 static void
 copy_buffer(uint8_t* buffer, uint8_t** copy_buffer, frame_info* buffer_info);
 
-static void
-save_ppm(std::string filename, uint8_t* buffer, frame_info* buffer_info)
-{
-  std::ofstream file(filename,
-                     std::ios::out | std::ios::binary | std::ios::trunc);
-  if (!file.is_open())
-    {
-      std::cerr << "Error: could not open file " << filename << std::endl;
-      return;
-    }
-
-  int width = buffer_info->width;
-  int height = buffer_info->height;
-  int stride = buffer_info->stride;
-  int pixel_stride = buffer_info->pixel_stride;
-
-  file << "P3\n";
-  file << width << " " << height << "\n";
-  file << "255\n";
-  for (int y = 0; y < height; ++y)
-    {
-      uint8_t* lineptr = buffer + y * stride;
-      for (int x = 0; x < width; ++x)
-        {
-          rgb* pxl = (rgb*)(lineptr + x * pixel_stride);
-          file << (int)pxl->r << " " << (int)pxl->g << " " << (int)pxl->b
-               << " ";
-        }
-    }
-}
-
 extern "C"
 {
   void
   filter_impl(uint8_t* buffer, frame_info* buffer_info, int th_low, int th_high)
   {
-    static int count_call = 0;
     // Compute background model
     uint8_t* bg_model = nullptr;
     compute_bg_model(buffer, buffer_info, &bg_model, true);
-    if (count_call == 190)
-      {
-        save_ppm("samples/bg_model.ppm", bg_model, buffer_info);
-      }
 
     int width = buffer_info->width;
     int height = buffer_info->height;
@@ -117,42 +78,21 @@ extern "C"
     // Copy frame buffer
     uint8_t* cpy_buffer = nullptr;
     copy_buffer(buffer, &cpy_buffer, buffer_info);
-    if (count_call == 190)
-      {
-        save_ppm("samples/buffer.ppm", cpy_buffer, buffer_info);
-      }
 
     // Convert frame to LAB
     rgb_to_lab(bg_model, cpy_buffer, buffer_info);
-    if (count_call == 190)
-      {
-        save_ppm("samples/lab.ppm", cpy_buffer, buffer_info);
-      }
 
     // Apply morphological opening
     opening_impl_inplace(cpy_buffer, buffer_info);
-    if (count_call == 190)
-      {
-        save_ppm("samples/opening.ppm", cpy_buffer, buffer_info);
-      }
 
     // Apply hysteresis threshold
     apply_hysteresis_threshold(cpy_buffer, buffer_info, th_low, th_high);
-    if (count_call == 190)
-      {
-        save_ppm("samples/hysteresis.ppm", cpy_buffer, buffer_info);
-      }
 
     // Apply masking
     apply_masking(buffer, buffer_info, cpy_buffer);
-    if (count_call == 190)
-      {
-        save_ppm("samples/masking.ppm", buffer, buffer_info);
-      }
 
     free(bg_model);
     free(cpy_buffer);
-    count_call++;
   }
 }
 //******************************************************
@@ -166,7 +106,6 @@ static void compute_bg_model(uint8_t* buffer,
                              uint8_t** bg_model,
                              bool is_median)
 {
-  static int count_call = 0;
   static uint8_t* frame_samples[BG_NUMBER_FRAMES];
   static int frame_samples_count = 0;
   static double last_timestamp = 0.0;
@@ -215,15 +154,6 @@ static void compute_bg_model(uint8_t* buffer,
           last_timestamp = buffer_info->timestamp;
         }
     }
-  if (count_call == 190)
-    {
-      for (int i = 0; i < BG_NUMBER_FRAMES; ++i)
-        {
-          std::ostringstream oss;
-          oss << "samples/frame_sample_" << i << ".ppm";
-          save_ppm(oss.str(), frame_samples[i], buffer_info);
-        }
-    }
 
   // Allocate memory for the new bg model
   *bg_model = (uint8_t*)malloc(height * stride);
@@ -239,7 +169,6 @@ static void compute_bg_model(uint8_t* buffer,
       estimate_background_mean(frame_samples, frame_samples_count, buffer_info,
                                *bg_model);
     }
-  count_call++;
 }
 
 void estimate_background_mean(uint8_t** buffers,
