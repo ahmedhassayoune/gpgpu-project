@@ -8,11 +8,21 @@ extern "C"
 {
 #endif
 
-  void filter_impl(uint8_t* buffer,
-                   int width,
-                   int height,
-                   int plane_stride,
-                   int pixel_stride);
+  struct frame
+  {
+    uint8_t* buffer;
+    int width;
+    int height;
+    int stride;
+    int pixel_stride;
+    double timestamp;
+  };
+
+  void filter_impl(struct frame* frame,
+                   int th_low,
+                   int th_high,
+                   int bg_sampling_rate,
+                   int bg_number_frames);
 
 #ifdef __cplusplus
 }
@@ -31,38 +41,20 @@ void estimate_background_median(_BE_FSIGN);
 #  undef _BE_FSIGN
 
 /** Conversion from RGB to LAB **/
-void rgb_to_lab(uint8_t* reference_buffer,
-                uint8_t* buffer,
-                int width,
-                int height,
-                int stride,
-                int pixel_stride);
+void rgb_to_lab(uint8_t* reference_buffer, frame* frame);
 
 /** 
  * applies a morphological opening (3-disk) 
  * on each rgb channel independently 
 **/
-void opening_impl_inplace(uint8_t* buffer,
-                          int width,
-                          int height,
-                          int stride,
-                          int pixel_stride);
+void opening_impl_inplace(frame* frame);
 
 /** Hysteresis Threshold **/
-void apply_hysteresis_threshold(uint8_t* buffer,
-                                int width,
-                                int height,
-                                int stride,
-                                int pixel_stride,
+void apply_hysteresis_threshold(frame* frame,
                                 uint8_t low_threshold,
                                 uint8_t high_threshold);
 
 /** Masking **/
-void apply_masking(uint8_t* buffer,
-                   int width,
-                   int height,
-                   int stride,
-                   int pixel_stride,
-                   uint8_t* mask);
+void apply_masking(frame* frame, uint8_t* mask);
 
 #endif

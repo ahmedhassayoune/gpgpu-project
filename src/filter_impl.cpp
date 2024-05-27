@@ -37,6 +37,11 @@ enum op_type
 };
 
 /* prototypes */
+static void compute_bg_model(frame* frame,
+                             uint8_t** bg_model,
+                             int bg_sampling_rate,
+                             int bg_number_frames);
+
 static void _selection_sort(uint8_t* bytes, int start, int end, int step);
 
 static void rgbToXyz(float r, float g, float b, float& x, float& y, float& z);
@@ -44,13 +49,7 @@ static void xyzToLab(float x, float y, float z, float& l, float& a, float& b);
 
 static inline void min_assign(rgb* lhs, rgb* rhs);
 static inline void max_assign(rgb* lhs, rgb* rhs);
-static void morphology_impl(uint8_t* input,
-                            uint8_t* output,
-                            int width,
-                            int height,
-                            int stride,
-                            int pixel_stride,
-                            op_type op);
+static void morphology_impl(frame* frame, uint8_t* output, op_type op);
 
 static void enqueue(Queue& q, int x, int y);
 static pos dequeue(Queue& q);
@@ -58,34 +57,13 @@ static bool is_empty(Queue& q);
 
 extern "C"
 {
-  void filter_impl(uint8_t* buffer,
-                   int width,
-                   int height,
-                   int stride,
-                   int pixel_stride)
+  void filter_impl(frame* frame,
+                   int th_low,
+                   int th_high,
+                   int bg_sampling_rate,
+                   int bg_number_frames)
   {
-    for (int y = 0; y < height; ++y)
-      {
-        uint8_t* lineptr = (uint8_t*)(buffer + y * stride);
-        for (int x = 0; x < width; ++x)
-          {
-            rgb pxl = *(rgb*)(lineptr + x * pixel_stride);
-            pxl.r = 0; // Back out red component
-
-            if (x < logo_width && y < logo_height)
-              {
-                float alpha = logo_data[y * logo_width + x] / 255.f;
-                pxl.g = uint8_t(alpha * pxl.g + (1 - alpha) * 255);
-                pxl.b = uint8_t(alpha * pxl.b + (1 - alpha) * 255);
-              }
-          }
-      }
-
-    // You can fake a long-time process with sleep
-    {
-      using namespace std::chrono_literals;
-      //std::this_thread::sleep_for(100ms);
-    }
+    // TODO: Merge all the filters into this function
   }
 }
 //******************************************************
@@ -93,6 +71,43 @@ extern "C"
 //**               Background Estimation              **
 //**                                                  **
 //******************************************************
+
+static void compute_bg_model(frame* frame,
+                             uint8_t** bg_model,
+                             int bg_sampling_rate,
+                             int bg_number_frames)
+{
+  static uint8_t** frame_samples = nullptr;
+  static int frame_samples_count = 0;
+  static double last_timestamp = 0.0;
+
+  uint8_t* buffer = frame->buffer;
+  int width = frame->width;
+  int height = frame->height;
+  int stride = frame->stride;
+  int pixel_stride = frame->pixel_stride;
+
+  // Allocate memory for the new bg model
+  uint8_t* new_bg = (uint8_t*)malloc(height * stride);
+  bg_model = &new_bg;
+  if (!frame_samples || frame_samples_count == 0)
+    {
+      // First frame is set to the background model
+      for (int y = 0; y < height; ++y)
+        {
+          uint8_t* lineptr = buffer + y * stride;
+          uint8_t* bg_lineptr = new_bg + y * stride;
+          for (int x = 0; x < width; ++x)
+            {
+              rgb* pxl = (rgb*)(lineptr + x * pixel_stride);
+              rgb* bg_pxl = (rgb*)(bg_lineptr + x * pixel_stride);
+              bg_pxl->r = pxl->r;
+              bg_pxl->g = pxl->g;
+              bg_pxl->b = pxl->b;
+            }
+        }
+    }
+}
 
 void estimate_background_mean(uint8_t** buffers,
                               int buffers_amount,
@@ -267,13 +282,14 @@ static void xyzToLab(float x, float y, float z, float& l, float& a, float& b)
   b = 200.0f * (fy - fz);
 }
 
-void rgb_to_lab(uint8_t* reference_buffer,
-                uint8_t* buffer,
-                int width,
-                int height,
-                int stride,
-                int pixel_stride)
+void rgb_to_lab(uint8_t* reference_buffer, frame* frame)
 {
+  uint8_t* buffer = frame->buffer;
+  int width = frame->width;
+  int height = frame->height;
+  int stride = frame->stride;
+  int pixel_stride = frame->pixel_stride;
+
   float* array_distance = new float[width * height];
 
   // Step 1 - Fill distance array
@@ -363,14 +379,14 @@ static inline void max_assign(rgb* lhs, rgb* rhs)
   lhs->b = std::max(lhs->b, rhs->b);
 }
 
-static void morphology_impl(uint8_t* input,
-                            uint8_t* output,
-                            int width,
-                            int height,
-                            int stride,
-                            int pixel_stride,
-                            op_type op)
+static void morphology_impl(frame* frame, uint8_t* output, op_type op)
 {
+  uint8_t* input = frame->buffer;
+  int width = frame->width;
+  int height = frame->height;
+  int stride = frame->stride;
+  int pixel_stride = frame->pixel_stride;
+
   // top line (1/7)
   for (int y = 0; y < height && y < 3; ++y)
     {
@@ -496,20 +512,17 @@ static void morphology_impl(uint8_t* input,
     }
 }
 
-void opening_impl_inplace(uint8_t* buffer,
-                          int width,
-                          int height,
-                          int stride,
-                          int pixel_stride)
+void opening_impl_inplace(frame* frame)
 {
-  uint8_t* other_buffer = (uint8_t*)malloc(height * stride);
+  uint8_t* other_buffer = (uint8_t*)malloc(frame->height * frame->stride);
   // i ignore potential malloc failure because i can't be bothered
 
-  morphology_impl(buffer, other_buffer, width, height, stride, pixel_stride,
-                  EROSION);
+  morphology_impl(frame, other_buffer, EROSION);
 
-  morphology_impl(other_buffer, buffer, width, height, stride, pixel_stride,
-                  DILATION);
+  uint8_t* tmp = frame->buffer;
+  frame->buffer = other_buffer;
+  morphology_impl(frame, tmp, DILATION);
+  frame->buffer = tmp;
 
   free(other_buffer);
 }
@@ -566,22 +579,20 @@ static bool is_empty(Queue& q) { return q.front == q.rear; }
  * high threshold OR the pixel intensity is greater than the low threshold and 
  * that region is connected to a region greater than the high threshold.
  * 
- * @param buffer The pointer to the buffer containing the image data.
- * @param width The width of the image.
- * @param height The height of the image.
- * @param stride The stride of the image buffer (typically width * pixel size).
- * @param pixel_stride The stride of each pixel in the buffer (typically 3 for RGB).
+ * @param frame The input frame.
  * @param low_threshold The lower threshold.
  * @param high_threshold The higher threshold.
  */
-void apply_hysteresis_threshold(uint8_t* buffer,
-                                int width,
-                                int height,
-                                int stride,
-                                int pixel_stride,
+void apply_hysteresis_threshold(frame* frame,
                                 uint8_t low_threshold,
                                 uint8_t high_threshold)
 {
+  uint8_t* buffer = frame->buffer;
+  int width = frame->width;
+  int height = frame->height;
+  int stride = frame->stride;
+  int pixel_stride = frame->pixel_stride;
+
   // Ensure low threshold is less than high threshold
   if (low_threshold > high_threshold)
     {
@@ -679,13 +690,14 @@ void apply_hysteresis_threshold(uint8_t* buffer,
 //**                                                  **
 //******************************************************
 
-void apply_masking(uint8_t* buffer,
-                   int width,
-                   int height,
-                   int stride,
-                   int pixel_stride,
-                   uint8_t* mask)
+void apply_masking(frame* frame, uint8_t* mask)
 {
+  uint8_t* buffer = frame->buffer;
+  int width = frame->width;
+  int height = frame->height;
+  int stride = frame->stride;
+  int pixel_stride = frame->pixel_stride;
+
   if (!buffer || !mask)
     return;
 
