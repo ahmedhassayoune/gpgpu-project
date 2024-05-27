@@ -252,14 +252,14 @@ static GstFlowReturn gst_cuda_filter_transform_frame_ip(GstVideoFilter* filter,
   }
 
   // Set filter params
-  struct frame f = {pixels, width, height, plane_stride, pixel_stride, frame_timestamp};
+  struct frame_info f_info = {width, height, plane_stride, pixel_stride, frame_timestamp};
   int th_low = 3;
   int th_high = 30;
   int bg_sampling_rate = 500;
   int bg_number_frames = 10;
 
   // Apply filter
-  filter_impl(&f, th_low, th_high, bg_sampling_rate, bg_number_frames);
+  filter_impl(pixels, &f_info, th_low, th_high, bg_sampling_rate, bg_number_frames);
 
   return GST_FLOW_OK;
 }

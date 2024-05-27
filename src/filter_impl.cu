@@ -87,17 +87,17 @@ namespace
 
 extern "C"
 {
-  void filter_impl(frame* frame,
+  void filter_impl(uint8_t* src_buffer,
+                  frame_info* buffer_info,
                    int th_low,
                    int th_high,
                    int bg_sampling_rate,
                    int bg_number_frames)
   {
-    uint8_t* src_buffer = frame->buffer;
-    int width = frame->width;
-    int height = frame->height;
-    int pixel_stride = frame->pixel_stride;
-    int src_stride = frame->stride;
+    int width = buffer_info->width;
+    int height = buffer_info->height;
+    int pixel_stride = buffer_info->pixel_stride;
+    int src_stride = buffer_info->stride;
 
     load_logo();
 

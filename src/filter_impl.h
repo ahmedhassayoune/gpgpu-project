@@ -8,9 +8,8 @@ extern "C"
 {
 #endif
 
-  struct frame
+  struct frame_info
   {
-    uint8_t* buffer;
     int width;
     int height;
     int stride;
@@ -18,7 +17,8 @@ extern "C"
     double timestamp;
   };
 
-  void filter_impl(struct frame* frame,
+  void filter_impl(uint8_t* buffer,
+                   struct frame_info* buffer_info,
                    int th_low,
                    int th_high,
                    int bg_sampling_rate,
@@ -41,20 +41,23 @@ void estimate_background_median(_BE_FSIGN);
 #  undef _BE_FSIGN
 
 /** Conversion from RGB to LAB **/
-void rgb_to_lab(uint8_t* reference_buffer, frame* frame);
+void rgb_to_lab(uint8_t* reference_buffer,
+                uint8_t* buffer,
+                frame_info* buffer_info);
 
 /** 
  * applies a morphological opening (3-disk) 
  * on each rgb channel independently 
 **/
-void opening_impl_inplace(frame* frame);
+void opening_impl_inplace(uint8_t* buffer, frame_info* buffer_info);
 
 /** Hysteresis Threshold **/
-void apply_hysteresis_threshold(frame* frame,
+void apply_hysteresis_threshold(uint8_t* buffer,
+                                frame_info* buffer_info,
                                 uint8_t low_threshold,
                                 uint8_t high_threshold);
 
 /** Masking **/
-void apply_masking(frame* frame, uint8_t* mask);
+void apply_masking(uint8_t* buffer, frame_info* buffer_info, uint8_t* mask);
 
 #endif
