@@ -90,9 +90,7 @@ extern "C"
   void filter_impl(uint8_t* src_buffer,
                   frame_info* buffer_info,
                    int th_low,
-                   int th_high,
-                   int bg_sampling_rate,
-                   int bg_number_frames)
+                   int th_high)
   {
     int width = buffer_info->width;
     int height = buffer_info->height;

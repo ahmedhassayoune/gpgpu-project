@@ -1,7 +1,10 @@
 #include "filter_impl.h"
 
 #include <chrono>
+#include <fstream>
 #include <iostream>
+#include <sstream>
+#include <string>
 #include <thread>
 #include <math.h>
 #include "logo.h"
@@ -40,8 +43,7 @@ enum op_type
 static void compute_bg_model(uint8_t* buffer,
                              frame_info* buffer_info,
                              uint8_t** bg_model,
-                             int bg_sampling_rate,
-                             int bg_number_frames);
+                             bool is_median);
 
 static void _selection_sort(uint8_t* bytes, int start, int end, int step);
 
@@ -59,16 +61,98 @@ static void enqueue(Queue& q, int x, int y);
 static pos dequeue(Queue& q);
 static bool is_empty(Queue& q);
 
+static void
+copy_buffer(uint8_t* buffer, uint8_t** copy_buffer, frame_info* buffer_info);
+
+static void
+save_ppm(std::string filename, uint8_t* buffer, frame_info* buffer_info)
+{
+  std::ofstream file(filename,
+                     std::ios::out | std::ios::binary | std::ios::trunc);
+  if (!file.is_open())
+    {
+      std::cerr << "Error: could not open file " << filename << std::endl;
+      return;
+    }
+
+  int width = buffer_info->width;
+  int height = buffer_info->height;
+  int stride = buffer_info->stride;
+  int pixel_stride = buffer_info->pixel_stride;
+
+  file << "P3\n";
+  file << width << " " << height << "\n";
+  file << "255\n";
+  for (int y = 0; y < height; ++y)
+    {
+      uint8_t* lineptr = buffer + y * stride;
+      for (int x = 0; x < width; ++x)
+        {
+          rgb* pxl = (rgb*)(lineptr + x * pixel_stride);
+          file << (int)pxl->r << " " << (int)pxl->g << " " << (int)pxl->b
+               << " ";
+        }
+    }
+}
+
 extern "C"
 {
-  void filter_impl(uint8_t* buffer,
-                   frame_info* buffer_info,
-                   int th_low,
-                   int th_high,
-                   int bg_sampling_rate,
-                   int bg_number_frames)
+  void
+  filter_impl(uint8_t* buffer, frame_info* buffer_info, int th_low, int th_high)
   {
-    // TODO: Merge all filters
+    static int count_call = 0;
+    // Compute background model
+    uint8_t* bg_model = nullptr;
+    compute_bg_model(buffer, buffer_info, &bg_model, true);
+    if (count_call == 190)
+      {
+        save_ppm("samples/bg_model.ppm", bg_model, buffer_info);
+      }
+
+    int width = buffer_info->width;
+    int height = buffer_info->height;
+    int stride = buffer_info->stride;
+    int pixel_stride = buffer_info->pixel_stride;
+
+    // Copy frame buffer
+    uint8_t* cpy_buffer = nullptr;
+    copy_buffer(buffer, &cpy_buffer, buffer_info);
+    if (count_call == 190)
+      {
+        save_ppm("samples/buffer.ppm", cpy_buffer, buffer_info);
+      }
+
+    // Convert frame to LAB
+    rgb_to_lab(bg_model, cpy_buffer, buffer_info);
+    if (count_call == 190)
+      {
+        save_ppm("samples/lab.ppm", cpy_buffer, buffer_info);
+      }
+
+    // Apply morphological opening
+    opening_impl_inplace(cpy_buffer, buffer_info);
+    if (count_call == 190)
+      {
+        save_ppm("samples/opening.ppm", cpy_buffer, buffer_info);
+      }
+
+    // Apply hysteresis threshold
+    apply_hysteresis_threshold(cpy_buffer, buffer_info, th_low, th_high);
+    if (count_call == 190)
+      {
+        save_ppm("samples/hysteresis.ppm", cpy_buffer, buffer_info);
+      }
+
+    // Apply masking
+    apply_masking(buffer, buffer_info, cpy_buffer);
+    if (count_call == 190)
+      {
+        save_ppm("samples/masking.ppm", buffer, buffer_info);
+      }
+
+    free(bg_model);
+    free(cpy_buffer);
+    count_call++;
   }
 }
 //******************************************************
@@ -80,10 +164,10 @@ extern "C"
 static void compute_bg_model(uint8_t* buffer,
                              frame_info* buffer_info,
                              uint8_t** bg_model,
-                             int bg_sampling_rate,
-                             int bg_number_frames)
+                             bool is_median)
 {
-  static uint8_t** frame_samples = nullptr;
+  static int count_call = 0;
+  static uint8_t* frame_samples[BG_NUMBER_FRAMES];
   static int frame_samples_count = 0;
   static double last_timestamp = 0.0;
 
@@ -92,34 +176,75 @@ static void compute_bg_model(uint8_t* buffer,
   int stride = buffer_info->stride;
   int pixel_stride = buffer_info->pixel_stride;
 
-  // Allocate memory for the new bg model
-  uint8_t* new_bg = (uint8_t*)malloc(height * stride);
-  bg_model = &new_bg;
-  if (!frame_samples || frame_samples_count == 0)
+  // First frame is set to the background model
+  if (frame_samples_count == 0)
     {
-      // First frame is set to the background model
-      for (int y = 0; y < height; ++y)
+      // Copy buffer
+      uint8_t* cpy_buffer = nullptr;
+      copy_buffer(buffer, &cpy_buffer, buffer_info);
+
+      frame_samples[0] = cpy_buffer;
+      frame_samples_count = 1;
+      last_timestamp = buffer_info->timestamp;
+    }
+  else if (buffer_info->timestamp - last_timestamp >= BG_SAMPLING_RATE)
+    {
+      if (frame_samples_count < BG_NUMBER_FRAMES)
         {
-          uint8_t* lineptr = buffer + y * stride;
-          uint8_t* bg_lineptr = new_bg + y * stride;
-          for (int x = 0; x < width; ++x)
+          // Copy buffer
+          uint8_t* cpy_buffer = nullptr;
+          copy_buffer(buffer, &cpy_buffer, buffer_info);
+
+          frame_samples[frame_samples_count] = cpy_buffer;
+          frame_samples_count += 1;
+          last_timestamp = buffer_info->timestamp;
+        }
+      else
+        {
+          // Copy buffer on the oldest frame w/o reallocating
+          uint8_t* cpy_buffer = frame_samples[0];
+          copy_buffer(buffer, &cpy_buffer, buffer_info);
+
+          // Shift frame samples
+          for (int i = 0; i < BG_NUMBER_FRAMES - 1; ++i)
             {
-              rgb* pxl = (rgb*)(lineptr + x * pixel_stride);
-              rgb* bg_pxl = (rgb*)(bg_lineptr + x * pixel_stride);
-              bg_pxl->r = pxl->r;
-              bg_pxl->g = pxl->g;
-              bg_pxl->b = pxl->b;
+              frame_samples[i] = frame_samples[i + 1];
             }
+
+          frame_samples[BG_NUMBER_FRAMES - 1] = cpy_buffer;
+          last_timestamp = buffer_info->timestamp;
         }
     }
+  if (count_call == 190)
+    {
+      for (int i = 0; i < BG_NUMBER_FRAMES; ++i)
+        {
+          std::ostringstream oss;
+          oss << "samples/frame_sample_" << i << ".ppm";
+          save_ppm(oss.str(), frame_samples[i], buffer_info);
+        }
+    }
+
+  // Allocate memory for the new bg model
+  *bg_model = (uint8_t*)malloc(height * stride);
+
+  // Estimate background
+  if (is_median)
+    {
+      estimate_background_median(frame_samples, frame_samples_count,
+                                 buffer_info, *bg_model);
+    }
+  else
+    {
+      estimate_background_mean(frame_samples, frame_samples_count, buffer_info,
+                               *bg_model);
+    }
+  count_call++;
 }
 
 void estimate_background_mean(uint8_t** buffers,
                               int buffers_amount,
-                              int width,
-                              int height,
-                              int stride,
-                              int pixel_stride,
+                              frame_info* buffer_info,
                               uint8_t* out)
 {
   // It is expected `out` has same stride values
@@ -130,6 +255,11 @@ void estimate_background_mean(uint8_t** buffers,
   for (int ii = 0; ii < buffers_amount; ++ii)
     if (!buffers[ii])
       return;
+
+  int width = buffer_info->width;
+  int height = buffer_info->height;
+  int stride = buffer_info->stride;
+  int pixel_stride = buffer_info->pixel_stride;
 
   int sums[N_CHANNELS] = {0};
 
@@ -177,10 +307,7 @@ static void _selection_sort(uint8_t* bytes, int start, int end, int step)
 
 void estimate_background_median(uint8_t** buffers,
                                 int buffers_amount,
-                                int width,
-                                int height,
-                                int stride,
-                                int pixel_stride,
+                                frame_info* buffer_info,
                                 uint8_t* out)
 {
   if (!buffers || !out)
@@ -189,6 +316,11 @@ void estimate_background_median(uint8_t** buffers,
   for (int ii = 0; ii < buffers_amount; ++ii)
     if (!buffers[ii])
       return;
+
+  int width = buffer_info->width;
+  int height = buffer_info->height;
+  int stride = buffer_info->stride;
+  int pixel_stride = buffer_info->pixel_stride;
 
   uint8_t B[512];
 
@@ -719,6 +851,49 @@ void apply_masking(uint8_t* buffer, frame_info* buffer_info, uint8_t* mask)
           red = red + (mask_pixelptr->r > 0) * red / 2;
           red = red > 0xff ? 0xff : red;
           in_pixelptr->r = (uint8_t)(red);
+        }
+    }
+}
+
+//******************************************************
+//**                                                  **
+//**                    UTILS                         **
+//**                                                  **
+//******************************************************
+
+/**
+ * Copy the content of a buffer to another buffer.
+ * If the destination buffer is null, it will be allocated.
+ * 
+ * @param buffer The buffer to copy.
+ * @param cpy_buffer The buffer to copy to.
+ * @param buffer_info The buffer information.
+
+*/
+static void
+copy_buffer(uint8_t* buffer, uint8_t** cpy_buffer, frame_info* buffer_info)
+{
+  int width = buffer_info->width;
+  int height = buffer_info->height;
+  int stride = buffer_info->stride;
+  int pixel_stride = buffer_info->pixel_stride;
+
+  if (*cpy_buffer == nullptr)
+    {
+      *cpy_buffer = (uint8_t*)malloc(height * stride);
+    }
+
+  for (int y = 0; y < height; ++y)
+    {
+      uint8_t* lineptr = buffer + y * stride;
+      uint8_t* copy_lineptr = *cpy_buffer + y * stride;
+      for (int x = 0; x < width; ++x)
+        {
+          rgb* pxl = (rgb*)(lineptr + x * pixel_stride);
+          rgb* copy_pxl = (rgb*)(copy_lineptr + x * pixel_stride);
+          copy_pxl->r = pxl->r;
+          copy_pxl->g = pxl->g;
+          copy_pxl->b = pxl->b;
         }
     }
 }

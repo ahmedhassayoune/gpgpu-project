@@ -8,6 +8,9 @@ extern "C"
 {
 #endif
 
+#define BG_SAMPLING_RATE 500
+#define BG_NUMBER_FRAMES 10
+
   struct frame_info
   {
     int width;
@@ -20,9 +23,7 @@ extern "C"
   void filter_impl(uint8_t* buffer,
                    struct frame_info* buffer_info,
                    int th_low,
-                   int th_high,
-                   int bg_sampling_rate,
-                   int bg_number_frames);
+                   int th_high);
 
 #ifdef __cplusplus
 }
@@ -32,8 +33,7 @@ extern "C"
 
 /** Background Estimation **/
 #  define _BE_FSIGN                                                            \
-    uint8_t **buffers, int buffers_amount, int width, int height, int stride,  \
-      int pixel_stride, uint8_t *out
+    uint8_t **buffers, int buffers_amount, frame_info *buffer_info, uint8_t *out
 
 void estimate_background_mean(_BE_FSIGN);
 void estimate_background_median(_BE_FSIGN);
