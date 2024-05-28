@@ -37,10 +37,10 @@ enum op_type
 };
 
 /* prototypes */
-static void compute_bg_model(uint8_t* buffer,
-                             frame_info* buffer_info,
-                             uint8_t** bg_model,
-                             bool is_median);
+static void update_bg_model(uint8_t* buffer,
+                            frame_info* buffer_info,
+                            uint8_t** bg_model,
+                            bool is_median);
 
 static void _selection_sort(uint8_t* bytes, int start, int end, int step);
 
@@ -66,9 +66,8 @@ extern "C"
   void
   filter_impl(uint8_t* buffer, frame_info* buffer_info, int th_low, int th_high)
   {
-    // Compute background model
-    uint8_t* bg_model = nullptr;
-    compute_bg_model(buffer, buffer_info, &bg_model, true);
+    // Set first frame as background model
+    static uint8_t* bg_model = buffer;
 
     int width = buffer_info->width;
     int height = buffer_info->height;
@@ -91,7 +90,9 @@ extern "C"
     // Apply masking
     apply_masking(buffer, buffer_info, cpy_buffer);
 
-    free(bg_model);
+    // Update background model
+    update_bg_model(buffer, buffer_info, &bg_model, true);
+
     free(cpy_buffer);
   }
 }
@@ -101,10 +102,10 @@ extern "C"
 //**                                                  **
 //******************************************************
 
-static void compute_bg_model(uint8_t* buffer,
-                             frame_info* buffer_info,
-                             uint8_t** bg_model,
-                             bool is_median)
+static void update_bg_model(uint8_t* buffer,
+                            frame_info* buffer_info,
+                            uint8_t** bg_model,
+                            bool is_median)
 {
   static uint8_t* frame_samples[BG_NUMBER_FRAMES];
   static int frame_samples_count = 0;
@@ -125,6 +126,10 @@ static void compute_bg_model(uint8_t* buffer,
       frame_samples[0] = cpy_buffer;
       frame_samples_count = 1;
       last_timestamp = buffer_info->timestamp;
+
+      // First bg_model is set to the buffer pointer
+      // so we set it to null to reallocate new memory after
+      *bg_model = nullptr;
     }
   else if (buffer_info->timestamp - last_timestamp >= BG_SAMPLING_RATE)
     {
@@ -155,8 +160,11 @@ static void compute_bg_model(uint8_t* buffer,
         }
     }
 
-  // Allocate memory for the new bg model
-  *bg_model = (uint8_t*)malloc(height * stride);
+  // Allocate memory for background model if not already allocated
+  if (*bg_model == nullptr)
+    {
+      *bg_model = (uint8_t*)malloc(height * stride);
+    }
 
   // Estimate background
   if (is_median)
