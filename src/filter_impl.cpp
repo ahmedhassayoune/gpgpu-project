@@ -1,6 +1,7 @@
 #include "filter_impl.h"
 
 #include <chrono>
+#include <cstring>
 #include <iostream>
 #include <thread>
 #include <math.h>
@@ -833,20 +834,8 @@ static void copy_buffer(uint8_t* buffer,
 
   if (mask == nullptr || fallback_buffer == nullptr)
     {
-      // Make a simple copy of buffer
-      for (int y = 0; y < height; ++y)
-        {
-          uint8_t* lineptr = buffer + y * stride;
-          uint8_t* cpy_lineptr = *cpy_buffer + y * stride;
-          for (int x = 0; x < width; ++x)
-            {
-              rgb* pxl = (rgb*)(lineptr + x * pixel_stride);
-              rgb* cpy_pxl = (rgb*)(cpy_lineptr + x * pixel_stride);
-              cpy_pxl->r = pxl->r;
-              cpy_pxl->g = pxl->g;
-              cpy_pxl->b = pxl->b;
-            }
-        }
+      // Copy buffer directly
+      std::memcpy(*cpy_buffer, buffer, height * stride);
     }
   else
     {
@@ -859,21 +848,17 @@ static void copy_buffer(uint8_t* buffer,
           uint8_t* fallback_lineptr = fallback_buffer + y * stride;
           for (int x = 0; x < width; ++x)
             {
-              rgb* pxl = (rgb*)(lineptr + x * pixel_stride);
-              rgb* cpy_pxl = (rgb*)(cpy_lineptr + x * pixel_stride);
               rgb* mask_pxl = (rgb*)(mask_lineptr + x * pixel_stride);
-              rgb* fallback_pxl = (rgb*)(fallback_lineptr + x * pixel_stride);
               if (mask_pxl->r != 0)
                 {
-                  cpy_pxl->r = pxl->r;
-                  cpy_pxl->g = pxl->g;
-                  cpy_pxl->b = pxl->b;
+                  std::memcpy(cpy_lineptr + x * pixel_stride,
+                              lineptr + x * pixel_stride, pixel_stride);
                 }
               else
                 {
-                  cpy_pxl->r = fallback_pxl->r;
-                  cpy_pxl->g = fallback_pxl->g;
-                  cpy_pxl->b = fallback_pxl->b;
+                  std::memcpy(cpy_lineptr + x * pixel_stride,
+                              fallback_lineptr + x * pixel_stride,
+                              pixel_stride);
                 }
             }
         }
