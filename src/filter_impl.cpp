@@ -40,6 +40,7 @@ enum op_type
 static void update_bg_model(uint8_t* buffer,
                             frame_info* buffer_info,
                             uint8_t** bg_model,
+                            uint8_t* mask,
                             bool is_median);
 
 static void _selection_sort(uint8_t* bytes, int start, int end, int step);
@@ -58,8 +59,11 @@ static void enqueue(Queue& q, int x, int y);
 static pos dequeue(Queue& q);
 static bool is_empty(Queue& q);
 
-static void
-copy_buffer(uint8_t* buffer, uint8_t** copy_buffer, frame_info* buffer_info);
+static void copy_buffer(uint8_t* buffer,
+                        uint8_t** cpy_buffer,
+                        frame_info* buffer_info,
+                        uint8_t* mask,
+                        uint8_t* fallback_buffer);
 
 extern "C"
 {
@@ -76,7 +80,7 @@ extern "C"
 
     // Copy frame buffer
     uint8_t* cpy_buffer = nullptr;
-    copy_buffer(buffer, &cpy_buffer, buffer_info);
+    copy_buffer(buffer, &cpy_buffer, buffer_info, nullptr, nullptr);
 
     // Convert frame to LAB
     rgb_to_lab(bg_model, cpy_buffer, buffer_info);
@@ -91,7 +95,7 @@ extern "C"
     apply_masking(buffer, buffer_info, cpy_buffer);
 
     // Update background model
-    update_bg_model(buffer, buffer_info, &bg_model, true);
+    update_bg_model(buffer, buffer_info, &bg_model, cpy_buffer, true);
 
     free(cpy_buffer);
   }
@@ -105,6 +109,7 @@ extern "C"
 static void update_bg_model(uint8_t* buffer,
                             frame_info* buffer_info,
                             uint8_t** bg_model,
+                            uint8_t* mask,
                             bool is_median)
 {
   static uint8_t* frame_samples[BG_NUMBER_FRAMES];
@@ -121,7 +126,7 @@ static void update_bg_model(uint8_t* buffer,
     {
       // Copy buffer
       uint8_t* cpy_buffer = nullptr;
-      copy_buffer(buffer, &cpy_buffer, buffer_info);
+      copy_buffer(buffer, &cpy_buffer, buffer_info, nullptr, nullptr);
 
       frame_samples[0] = cpy_buffer;
       frame_samples_count = 1;
@@ -135,9 +140,9 @@ static void update_bg_model(uint8_t* buffer,
     {
       if (frame_samples_count < BG_NUMBER_FRAMES)
         {
-          // Copy buffer
+          // Copy buffer and apply mask to remove foreground
           uint8_t* cpy_buffer = nullptr;
-          copy_buffer(buffer, &cpy_buffer, buffer_info);
+          copy_buffer(buffer, &cpy_buffer, buffer_info, mask, *bg_model);
 
           frame_samples[frame_samples_count] = cpy_buffer;
           frame_samples_count += 1;
@@ -146,8 +151,9 @@ static void update_bg_model(uint8_t* buffer,
       else
         {
           // Copy buffer on the oldest frame w/o reallocating
+          // And apply mask to remove foreground
           uint8_t* cpy_buffer = frame_samples[0];
-          copy_buffer(buffer, &cpy_buffer, buffer_info);
+          copy_buffer(buffer, &cpy_buffer, buffer_info, mask, *bg_model);
 
           // Shift frame samples
           for (int i = 0; i < BG_NUMBER_FRAMES - 1; ++i)
@@ -805,10 +811,15 @@ void apply_masking(uint8_t* buffer, frame_info* buffer_info, uint8_t* mask)
  * @param buffer The buffer to copy.
  * @param cpy_buffer The buffer to copy to.
  * @param buffer_info The buffer information.
+ * @param mask The mask to apply.
+ * @param fallback_buffer The buffer to apply for the empty pixels.
 
 */
-static void
-copy_buffer(uint8_t* buffer, uint8_t** cpy_buffer, frame_info* buffer_info)
+static void copy_buffer(uint8_t* buffer,
+                        uint8_t** cpy_buffer,
+                        frame_info* buffer_info,
+                        uint8_t* mask,
+                        uint8_t* fallback_buffer)
 {
   int width = buffer_info->width;
   int height = buffer_info->height;
@@ -820,17 +831,51 @@ copy_buffer(uint8_t* buffer, uint8_t** cpy_buffer, frame_info* buffer_info)
       *cpy_buffer = (uint8_t*)malloc(height * stride);
     }
 
-  for (int y = 0; y < height; ++y)
+  if (mask == nullptr || fallback_buffer == nullptr)
     {
-      uint8_t* lineptr = buffer + y * stride;
-      uint8_t* copy_lineptr = *cpy_buffer + y * stride;
-      for (int x = 0; x < width; ++x)
+      // Make a simple copy of buffer
+      for (int y = 0; y < height; ++y)
         {
-          rgb* pxl = (rgb*)(lineptr + x * pixel_stride);
-          rgb* copy_pxl = (rgb*)(copy_lineptr + x * pixel_stride);
-          copy_pxl->r = pxl->r;
-          copy_pxl->g = pxl->g;
-          copy_pxl->b = pxl->b;
+          uint8_t* lineptr = buffer + y * stride;
+          uint8_t* cpy_lineptr = *cpy_buffer + y * stride;
+          for (int x = 0; x < width; ++x)
+            {
+              rgb* pxl = (rgb*)(lineptr + x * pixel_stride);
+              rgb* cpy_pxl = (rgb*)(cpy_lineptr + x * pixel_stride);
+              cpy_pxl->r = pxl->r;
+              cpy_pxl->g = pxl->g;
+              cpy_pxl->b = pxl->b;
+            }
+        }
+    }
+  else
+    {
+      // Copy buffer where mask is not false, otherwise copy fallback buffer
+      for (int y = 0; y < height; ++y)
+        {
+          uint8_t* lineptr = buffer + y * stride;
+          uint8_t* cpy_lineptr = *cpy_buffer + y * stride;
+          uint8_t* mask_lineptr = mask + y * stride;
+          uint8_t* fallback_lineptr = fallback_buffer + y * stride;
+          for (int x = 0; x < width; ++x)
+            {
+              rgb* pxl = (rgb*)(lineptr + x * pixel_stride);
+              rgb* cpy_pxl = (rgb*)(cpy_lineptr + x * pixel_stride);
+              rgb* mask_pxl = (rgb*)(mask_lineptr + x * pixel_stride);
+              rgb* fallback_pxl = (rgb*)(fallback_lineptr + x * pixel_stride);
+              if (mask_pxl->r != 0)
+                {
+                  cpy_pxl->r = pxl->r;
+                  cpy_pxl->g = pxl->g;
+                  cpy_pxl->b = pxl->b;
+                }
+              else
+                {
+                  cpy_pxl->r = fallback_pxl->r;
+                  cpy_pxl->g = fallback_pxl->g;
+                  cpy_pxl->b = fallback_pxl->b;
+                }
+            }
         }
     }
 }
