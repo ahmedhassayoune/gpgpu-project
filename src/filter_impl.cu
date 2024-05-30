@@ -61,6 +61,15 @@ remove_red_channel_inp(std::byte* buffer, int width, int height, int stride)
     }
 }
 
+/// @brief Apply a threshold on the buffer and store the result in the marker
+/// @param buffer The input buffer
+/// @param bpitch The pitch of the input buffer
+/// @param marker The marker buffer
+/// @param mpitch The pitch of the marker buffer
+/// @param width The width of the image
+/// @param height The height of the image
+/// @param high_threshold The high threshold
+/// @return 
 __global__ void apply_threshold_on_marker(std::byte* buffer,
                                           size_t bpitch,
                                           bool* marker,
@@ -88,6 +97,17 @@ __global__ void apply_threshold_on_marker(std::byte* buffer,
     }
 }
 
+/// @brief Reconstruct the hysteresis thresholding image from the marker
+/// @param buffer The input buffer
+/// @param bpitch The pitch of the input buffer
+/// @param out The output buffer
+/// @param opitch The pitch of the output buffer
+/// @param marker The marker buffer
+/// @param mpitch The pitch of the marker buffer
+/// @param width The width of the image
+/// @param height The height of the image
+/// @param low_threshold The low threshold
+/// @return 
 __global__ void reconstruct_image(std::byte* buffer,
                                   size_t bpitch,
                                   std::byte* out,
@@ -171,6 +191,13 @@ namespace
       }
   }
 
+  /// @brief Apply hysteresis thresholding on the buffer
+  /// @param buffer The input buffer
+  /// @param width The width of the image
+  /// @param height The height of the image
+  /// @param bpitch The pitch of the input buffer
+  /// @param low_threshold The low threshold
+  /// @param high_threshold The high threshold 
   void apply_hysteresis_threshold(std::byte* buffer,
                                   int width,
                                   int height,
