@@ -104,7 +104,6 @@ __global__ void reconstruct_image(std::byte* buffer,
   if (x >= width || y >= height)
     return;
 
-  rgb* buffer_line = (rgb*)(buffer + y * bpitch);
   rgb* out_line = (rgb*)(out + y * opitch);
   bool* marker_line = (bool*)((std::byte*)marker + y * mpitch);
 
@@ -132,10 +131,10 @@ __global__ void reconstruct_image(std::byte* buffer,
           // Check if the pixel is within the image boundaries
           if (x + i >= 0 && x + i < width && y + j >= 0 && y + j < height)
             {
-              out_line = (rgb*)(out + (y + j) * opitch);
+              rgb* buffer_line = (rgb*)(buffer + (y + j) * bpitch);
               bool* marker_line =
                 (bool*)((std::byte*)marker + (y + j) * mpitch);
-              if (out_line[x + i].r <= low_threshold || marker_line[x + i])
+              if (marker_line[x + i] || buffer_line[x + i].r <= low_threshold)
                 {
                   continue;
                 }
@@ -219,19 +218,33 @@ namespace
     CHECK_CUDA_ERROR(err);
 
     // Apply hysteresis thresholding
-    do {
-      hysteresis_has_changed = false;
-      reconstruct_image<<<gridSize, blockSize>>>(buffer, bpitch, out_buffer,
-                                                opitch, marker, mpitch, width,
-                                                height, low_threshold);
+    bool h_hysteresis_has_changed = true;
+    while (h_hysteresis_has_changed)
+      {
+        // Copy the value of hysteresis_has_changed to device
+        h_hysteresis_has_changed = false;
+        err =
+          cudaMemcpyToSymbol(hysteresis_has_changed, &h_hysteresis_has_changed,
+                             sizeof(h_hysteresis_has_changed));
+        CHECK_CUDA_ERROR(err);
 
-      err = cudaDeviceSynchronize();
-      CHECK_CUDA_ERROR(err);
-    } while(hysteresis_has_changed);
-  
+        reconstruct_image<<<gridSize, blockSize>>>(
+          buffer, bpitch, out_buffer, opitch, marker, mpitch, width, height,
+          low_threshold);
+
+        err = cudaDeviceSynchronize();
+        CHECK_CUDA_ERROR(err);
+
+        // Retrieve the value of hysteresis_has_changed from device
+        err = cudaMemcpyFromSymbol(&h_hysteresis_has_changed,
+                                   hysteresis_has_changed,
+                                   sizeof(hysteresis_has_changed));
+        CHECK_CUDA_ERROR(err);
+      }
+
     // Copy the final image to the buffer
-    err = cudaMemcpy2D(buffer, bpitch, out_buffer, opitch,
-                       width * sizeof(rgb), height, cudaMemcpyDefault);
+    err = cudaMemcpy2D(buffer, bpitch, out_buffer, opitch, width * sizeof(rgb),
+                       height, cudaMemcpyDefault);
     CHECK_CUDA_ERROR(err);
 
     cudaFree(marker);
@@ -265,7 +278,7 @@ extern "C"
     dim3 blockSize(16, 16);
     dim3 gridSize((width + (blockSize.x - 1)) / blockSize.x,
                   (height + (blockSize.y - 1)) / blockSize.y);
-
+    
     remove_red_channel_inp<<<gridSize, blockSize>>>(dBuffer, width, height,
                                                     pitch);
 
