@@ -27,6 +27,8 @@ struct rgb
   uint8_t r, g, b;
 };
 
+__device__ bool hysteresis_has_changed;
+
 __constant__ uint8_t* logo;
 
 /// @brief Black out the red channel from the video and add EPITA's logo
@@ -59,6 +61,92 @@ remove_red_channel_inp(std::byte* buffer, int width, int height, int stride)
     }
 }
 
+__global__ void apply_threshold_on_marker(std::byte* buffer,
+                                          size_t bpitch,
+                                          bool* marker,
+                                          size_t mpitch,
+                                          int width,
+                                          int height,
+                                          int high_threshold)
+{
+  int y = blockIdx.y * blockDim.y + threadIdx.y;
+  int x = blockIdx.x * blockDim.x + threadIdx.x;
+
+  if (x >= width || y >= height)
+    return;
+
+  rgb* buffer_line = (rgb*)(buffer + y * bpitch);
+  bool* marker_line = (bool*)((std::byte*)marker + y * mpitch);
+
+  if (buffer_line[x].r > high_threshold)
+    {
+      marker_line[x] = true;
+    }
+  else
+    {
+      marker_line[x] = false;
+    }
+}
+
+__global__ void reconstruct_image(std::byte* buffer,
+                                  size_t bpitch,
+                                  std::byte* out,
+                                  size_t opitch,
+                                  bool* marker,
+                                  size_t mpitch,
+                                  int width,
+                                  int height,
+                                  int low_threshold)
+{
+  int y = blockIdx.y * blockDim.y + threadIdx.y;
+  int x = blockIdx.x * blockDim.x + threadIdx.x;
+
+  if (x >= width || y >= height)
+    return;
+
+  rgb* buffer_line = (rgb*)(buffer + y * bpitch);
+  rgb* out_line = (rgb*)(out + y * opitch);
+  bool* marker_line = (bool*)((std::byte*)marker + y * mpitch);
+
+  if (!marker_line[x] || out_line[x].r != 0)
+    {
+      return;
+    }
+
+  // Set the pixel to white
+  out_line[x].r = 255;
+  out_line[x].g = 255;
+  out_line[x].b = 255;
+
+  // Mark the 8-connected neighbors if they are above the low threshold
+  for (int i = -1; i <= 1; i++)
+    {
+      for (int j = -1; j <= 1; j++)
+        {
+          // Skip the current pixel
+          if (i == 0 && j == 0)
+            {
+              continue;
+            }
+
+          // Check if the pixel is within the image boundaries
+          if (x + i >= 0 && x + i < width && y + j >= 0 && y + j < height)
+            {
+              out_line = (rgb*)(out + (y + j) * opitch);
+              bool* marker_line =
+                (bool*)((std::byte*)marker + (y + j) * mpitch);
+              if (out_line[x + i].r <= low_threshold || marker_line[x + i])
+                {
+                  continue;
+                }
+
+              marker_line[x + i] = true;
+              hysteresis_has_changed = true;
+            }
+        }
+    }
+}
+
 namespace
 {
   void load_logo()
@@ -82,6 +170,72 @@ namespace
 
         buffer.reset(ptr);
       }
+  }
+
+  void apply_hysteresis_threshold(std::byte* buffer,
+                                  int width,
+                                  int height,
+                                  size_t bpitch,
+                                  int low_threshold,
+                                  int high_threshold)
+  {
+    // Ensure low threshold is less than high threshold
+    if (low_threshold > high_threshold)
+      {
+        low_threshold = high_threshold;
+      }
+
+    // Create a marker buffer to store the pixels that are above the high threshold
+    bool* marker;
+    size_t mpitch;
+    cudaError_t err;
+    err = cudaMallocPitch(&marker, &mpitch, width * sizeof(bool), height);
+    CHECK_CUDA_ERROR(err);
+
+    // And set it to false
+    err = cudaMemset2D(marker, mpitch, 0, width * sizeof(bool), height);
+    CHECK_CUDA_ERROR(err);
+
+    // Create an out buffer to store the final image
+    std::byte* out_buffer;
+    size_t opitch;
+    err = cudaMallocPitch(&out_buffer, &opitch, width * sizeof(rgb), height);
+    CHECK_CUDA_ERROR(err);
+
+    // And set it to black
+    err = cudaMemset2D(out_buffer, opitch, 0, width * sizeof(rgb), height);
+    CHECK_CUDA_ERROR(err);
+
+    err = cudaDeviceSynchronize();
+    CHECK_CUDA_ERROR(err);
+
+    dim3 blockSize(16, 16);
+    dim3 gridSize((width + (blockSize.x - 1)) / blockSize.x,
+                  (height + (blockSize.y - 1)) / blockSize.y);
+    apply_threshold_on_marker<<<gridSize, blockSize>>>(
+      buffer, bpitch, marker, mpitch, width, height, high_threshold);
+
+    err = cudaDeviceSynchronize();
+    CHECK_CUDA_ERROR(err);
+
+    // Apply hysteresis thresholding
+    do {
+      hysteresis_has_changed = false;
+      reconstruct_image<<<gridSize, blockSize>>>(buffer, bpitch, out_buffer,
+                                                opitch, marker, mpitch, width,
+                                                height, low_threshold);
+
+      err = cudaDeviceSynchronize();
+      CHECK_CUDA_ERROR(err);
+    } while(hysteresis_has_changed);
+  
+    // Copy the final image to the buffer
+    err = cudaMemcpy2D(buffer, bpitch, out_buffer, opitch,
+                       width * sizeof(rgb), height, cudaMemcpyDefault);
+    CHECK_CUDA_ERROR(err);
+
+    cudaFree(marker);
+    cudaFree(out_buffer);
   }
 } // namespace
 
