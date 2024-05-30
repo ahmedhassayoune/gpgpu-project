@@ -69,7 +69,7 @@ remove_red_channel_inp(std::byte* buffer, int width, int height, int stride)
 /// @param width The width of the image
 /// @param height The height of the image
 /// @param high_threshold The high threshold
-/// @return 
+/// @return
 __global__ void apply_threshold_on_marker(std::byte* buffer,
                                           size_t bpitch,
                                           bool* marker,
@@ -91,10 +91,6 @@ __global__ void apply_threshold_on_marker(std::byte* buffer,
     {
       marker_line[x] = true;
     }
-  else
-    {
-      marker_line[x] = false;
-    }
 }
 
 /// @brief Reconstruct the hysteresis thresholding image from the marker
@@ -107,7 +103,7 @@ __global__ void apply_threshold_on_marker(std::byte* buffer,
 /// @param width The width of the image
 /// @param height The height of the image
 /// @param low_threshold The low threshold
-/// @return 
+/// @return
 __global__ void reconstruct_image(std::byte* buffer,
                                   size_t bpitch,
                                   std::byte* out,
@@ -148,19 +144,21 @@ __global__ void reconstruct_image(std::byte* buffer,
               continue;
             }
 
-          // Check if the pixel is within the image boundaries
-          if (x + i >= 0 && x + i < width && y + j >= 0 && y + j < height)
-            {
-              rgb* buffer_line = (rgb*)(buffer + (y + j) * bpitch);
-              bool* marker_line =
-                (bool*)((std::byte*)marker + (y + j) * mpitch);
-              if (marker_line[x + i] || buffer_line[x + i].r <= low_threshold)
-                {
-                  continue;
-                }
+          int ny = y + j;
+          int nx = x + i;
 
-              marker_line[x + i] = true;
-              hysteresis_has_changed = true;
+          // Check if the pixel is within the image boundaries
+          if (nx >= 0 && nx < width && ny >= 0 && ny < height)
+            {
+              rgb* buffer_line = (rgb*)(buffer + ny * bpitch);
+              bool* neighbor_marker_line =
+                (bool*)((std::byte*)marker + ny * mpitch);
+              if (!neighbor_marker_line[nx]
+                  && buffer_line[nx].r > low_threshold)
+                {
+                  neighbor_marker_line[nx] = true;
+                  hysteresis_has_changed = true;
+                }
             }
         }
     }
@@ -197,7 +195,7 @@ namespace
   /// @param height The height of the image
   /// @param bpitch The pitch of the input buffer
   /// @param low_threshold The low threshold
-  /// @param high_threshold The high threshold 
+  /// @param high_threshold The high threshold
   void apply_hysteresis_threshold(std::byte* buffer,
                                   int width,
                                   int height,
@@ -305,7 +303,7 @@ extern "C"
     dim3 blockSize(16, 16);
     dim3 gridSize((width + (blockSize.x - 1)) / blockSize.x,
                   (height + (blockSize.y - 1)) / blockSize.y);
-    
+
     remove_red_channel_inp<<<gridSize, blockSize>>>(dBuffer, width, height,
                                                     pitch);
 
