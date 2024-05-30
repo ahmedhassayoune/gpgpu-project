@@ -59,6 +59,108 @@ remove_red_channel_inp(std::byte* buffer, int width, int height, int stride)
     }
 }
 
+//******************************************************
+//**                                                  **
+//**               Background Estimation              **
+//**                                                  **
+//******************************************************
+
+#define _BACKGROUND_ESTIMATION_SPST // single position single thread
+#define N_CHANNELS 3
+
+__global__ void estimate_background_mean(uint8_t** buffers,
+                                         int buffers_amount,
+                                         int width,
+                                         int height,
+                                         int stride,
+                                         int pixel_stride,
+                                         uint8_t* out)
+{
+  int yy = blockIdx.y * blockDim.y + threadIdx.y;
+  int xx = blockIdx.x * blockDim.x + threadIdx.x;
+
+  if (xx >= width || yy >= height)
+    return;
+
+#ifdef _BACKGROUND_ESTIMATION_SPST
+  // compute sum per channel
+  int sums[N_CHANNELS] = {0};
+  uint8_t* ptr;
+  for (int ii = 0; ii < buffers_amount; ++ii)
+    {
+      ptr = buffers[ii] + yy * stride + xx * pixel_stride;
+      for (int jj = 0; jj < N_CHANNELS; ++jj)
+        sums[jj] += ptr[jj];
+    }
+
+  // compute mean per channel
+  ptr = out + yy * stride + xx * pixel_stride;
+  for (int ii = 0; ii < N_CHANNELS; ++ii)
+    ptr[ii] = (uint8_t)(sums[ii] / buffers_amount);
+#else
+#endif
+}
+
+__global__ void estimate_background_median(uint8_t** buffers,
+                                           int buffers_amount,
+                                           int width,
+                                           int height,
+                                           int stride,
+                                           int pixel_stride,
+                                           uint8_t* out)
+{
+  int yy = blockIdx.y * blockDim.y + threadIdx.y;
+  int xx = blockIdx.x * blockDim.x + threadIdx.x;
+
+  if (xx >= width || yy >= height)
+    return;
+
+#ifdef _BACKGROUND_ESTIMATION_SPST
+  // 3 channels, at most 42 buffers
+  // 4 channels, at most 32 buffers
+  uint8_t B[128];
+
+  // for each buffer, store pixel at (yy, xx)
+  for (int ii = 0; ii < buffers_amount; ++ii)
+    {
+      uint8_t* ptr = buffers[ii] + yy * stride + xx * pixel_stride;
+      int jj = ii * N_CHANNELS;
+      for (int kk = 0; kk < N_CHANNELS; ++kk)
+        B[jj + kk] = ptr[kk];
+    }
+
+#  define _SELECTION_SORT(Arr, Start, End, Step)                               \
+    {                                                                          \
+      for (int _ii = (Start); _ii + (Step) < (End); _ii += (Step))             \
+        {                                                                      \
+          int _jj = _ii;                                                       \
+          for (int _kk = _jj + (Step); _kk < (End); _kk += (Step))             \
+            if ((Arr)[_jj] > (Arr)[_kk])                                       \
+              _jj = _kk;                                                       \
+          uint8_t tmp = (Arr)[_jj];                                            \
+          (Arr)[_jj] = (Arr)[_ii];                                             \
+          (Arr)[_ii] = tmp;                                                    \
+        }                                                                      \
+    }
+
+  // the median is computed for each channel
+  for (int ii = 0; ii < N_CHANNELS; ++ii)
+    _SELECTION_SORT(B, ii, buffers_amount * N_CHANNELS, N_CHANNELS);
+#  undef _SELECTION_SORT
+
+  // select mid
+  // not treating differently even and odd `buffers_amount`
+  // in order to avoid if clause inside a kernel
+  uint8_t* ptr = out + yy * stride + xx * pixel_stride;
+  for (int ii = 0; ii < N_CHANNELS; ++ii)
+    ptr[ii] = B[(buffers_amount / 2) * N_CHANNELS + ii];
+#else
+#endif
+}
+
+#undef _BACKGROUND_ESTIMATION_SPST
+#undef N_CHANNELS
+
 namespace
 {
   void load_logo()
