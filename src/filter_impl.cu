@@ -54,6 +54,98 @@ remove_red_channel_inp(std::byte* buffer, int width, int height, int stride)
     }
 }
 
+
+
+//******************************************************
+//**                                                  **
+//**             Morphological Opening                **
+//**                                                  **
+//******************************************************
+
+
+
+__global__ void morphological_opening_inplace(uint8_t* buffer,
+                                         int width,
+                                         int height,
+                                         int stride,
+                                         int pixel_stride)
+{
+  int yy = blockIdx.y * blockDim.y + threadIdx.y;
+  int xx = (blockIdx.x * blockDim.x + threadIdx.x) / 3;
+  int idx = (blockIdx.x * blockDim.x + threadIdx.x) % 3
+
+  if (xx >= width || yy >= height)
+    return;
+  
+  uint8_t res = 255;
+
+  if (yy >= 3) {
+    res = buffer[(yy - 3) * stride + xx * pixel_stride + idx];
+  }
+  for (int i = y - 2; i < y; ++i) {
+    if (i >= 0) {
+      for (int j = xx - 2; j <= xx +2; j++) {
+        if (j >= 0 && j < width) {
+          res = min(res, buffer[i * stride + j * pixel_stride + idx]);
+        }
+      }
+    }
+  }
+  for (int j = xx - 3; j <= xx + 3; j++) {
+    if (j >= 0 && j < width) {
+        res = min(res, buffer[yy * stride + j * pixel_stride + idx]);
+    }
+  }
+  for (int i = y + 1; i <= y + 2; ++i) {
+    if (i < width) {
+      for (int j = xx - 2; j <= xx +2; j++) {
+        if (j >= 0 && j < width) {
+          res = min(res, buffer[i * stride + j * pixel_stride + idx]);
+        }
+      }
+    }
+  }
+  if (yy + 3 < width) {
+    res = min(res, buffer[(yy - 3) * stride + xx * pixel_stride + idx]);
+  }
+
+  //__syncthreads();
+  buffer[yy * stride + xx * pixel_stride + idx] = res;
+  //__syncthreads();
+
+  res = 0;
+
+  if (yy >= 3) {
+    res = buffer[(yy - 3) * stride + xx * pixel_stride + idx];
+  }
+  for (int i = y - 2; i < y; ++i) {
+    if (i >= 0) {
+      for (int j = xx - 2; j <= xx +2; j++) {
+        if (j >= 0 && j < width) {
+          res = max(res, buffer[i * stride + j * pixel_stride + idx]);
+        }
+      }
+    }
+  }
+  for (int j = xx - 3; j <= xx + 3; j++) {
+    if (j >= 0 && j < width) {
+        res = max(res, buffer[yy * stride + j * pixel_stride + idx]);
+    }
+  }
+  for (int i = y + 1; i <= y + 2; ++i) {
+    if (i < width) {
+      for (int j = xx - 2; j <= xx +2; j++) {
+        if (j >= 0 && j < width) {
+          res = max(res, buffer[i * stride + j * pixel_stride + idx]);
+        }
+      }
+    }
+  }
+  if (yy + 3 < width) {
+    res = max(res, buffer[(yy - 3) * stride + xx * pixel_stride + idx]);
+  }
+}
+
 namespace
 {
   void load_logo()
@@ -127,4 +219,7 @@ extern "C"
       //std::this_thread::sleep_for(100ms);
     }
   }
+
+
+
 }
