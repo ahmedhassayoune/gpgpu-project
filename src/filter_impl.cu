@@ -65,7 +65,6 @@ remove_red_channel_inp(std::byte* buffer, int width, int height, int stride)
 //**                                                  **
 //******************************************************
 
-#define _BACKGROUND_ESTIMATION_SPST // single position single thread
 #define N_CHANNELS 3
 
 __global__ void estimate_background_mean(uint8_t** buffers,
@@ -76,13 +75,15 @@ __global__ void estimate_background_mean(uint8_t** buffers,
                                          int pixel_stride,
                                          uint8_t* out)
 {
+#define _BACKGROUND_ESTIMATION_MEAN_SPST // single position single thread
+
   int yy = blockIdx.y * blockDim.y + threadIdx.y;
   int xx = blockIdx.x * blockDim.x + threadIdx.x;
 
   if (xx >= width || yy >= height)
     return;
 
-#ifdef _BACKGROUND_ESTIMATION_SPST
+#ifdef _BACKGROUND_ESTIMATION_MEAN_SPST
   // compute sum per channel
   int sums[N_CHANNELS] = {0};
   uint8_t* ptr;
@@ -99,6 +100,24 @@ __global__ void estimate_background_mean(uint8_t** buffers,
     ptr[ii] = (uint8_t)(sums[ii] / buffers_amount);
 #else
 #endif
+
+#undef _BACKGROUND_ESTIMATION_MEAN_SPST
+}
+
+__device__ void _insertion_sort(uint8_t* arr, int start, int end, int step)
+{
+  for (int ii = start + step; ii < end; ii += step)
+    {
+      int jj = ii;
+
+      while (jj > start && arr[jj - step] > arr[jj])
+        {
+          uint8_t tmp = arr[jj - step];
+          arr[jj - step] = arr[jj];
+          arr[jj] = tmp;
+          jj -= step;
+        }
+    }
 }
 
 __global__ void estimate_background_median(uint8_t** buffers,
@@ -109,13 +128,15 @@ __global__ void estimate_background_median(uint8_t** buffers,
                                            int pixel_stride,
                                            uint8_t* out)
 {
+#define _BACKGROUND_ESTIMATION_MEDIAN_SPST // single position single thread
+
   int yy = blockIdx.y * blockDim.y + threadIdx.y;
   int xx = blockIdx.x * blockDim.x + threadIdx.x;
 
   if (xx >= width || yy >= height)
     return;
 
-#ifdef _BACKGROUND_ESTIMATION_SPST
+#ifdef _BACKGROUND_ESTIMATION_MEDIAN_SPST
   // 3 channels, at most 42 buffers
   // 4 channels, at most 32 buffers
   uint8_t B[128];
@@ -129,24 +150,9 @@ __global__ void estimate_background_median(uint8_t** buffers,
         B[jj + kk] = ptr[kk];
     }
 
-#  define _SELECTION_SORT(Arr, Start, End, Step)                               \
-    {                                                                          \
-      for (int _ii = (Start); _ii + (Step) < (End); _ii += (Step))             \
-        {                                                                      \
-          int _jj = _ii;                                                       \
-          for (int _kk = _jj + (Step); _kk < (End); _kk += (Step))             \
-            if ((Arr)[_jj] > (Arr)[_kk])                                       \
-              _jj = _kk;                                                       \
-          uint8_t tmp = (Arr)[_jj];                                            \
-          (Arr)[_jj] = (Arr)[_ii];                                             \
-          (Arr)[_ii] = tmp;                                                    \
-        }                                                                      \
-    }
-
   // the median is computed for each channel
   for (int ii = 0; ii < N_CHANNELS; ++ii)
-    _SELECTION_SORT(B, ii, buffers_amount * N_CHANNELS, N_CHANNELS);
-#  undef _SELECTION_SORT
+    _insertion_sort(B, ii, buffers_amount * N_CHANNELS, N_CHANNELS);
 
   // select mid
   // not treating differently even and odd `buffers_amount`
@@ -156,9 +162,10 @@ __global__ void estimate_background_median(uint8_t** buffers,
     ptr[ii] = B[(buffers_amount / 2) * N_CHANNELS + ii];
 #else
 #endif
+
+#undef _BACKGROUND_ESTIMATION_MEDIAN_SPST
 }
 
-#undef _BACKGROUND_ESTIMATION_SPST
 #undef N_CHANNELS
 
 namespace
