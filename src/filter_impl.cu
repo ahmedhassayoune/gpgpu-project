@@ -71,78 +71,103 @@ __global__ void morphological_opening_inplace(uint8_t* buffer,
                                          int pixel_stride)
 {
   int yy = blockIdx.y * blockDim.y + threadIdx.y;
-  int xx = (blockIdx.x * blockDim.x + threadIdx.x) / 3;
-  int idx = (blockIdx.x * blockDim.x + threadIdx.x) % 3
+  int xx = (blockIdx.x * blockDim.x + threadIdx.x);
 
   if (xx >= width || yy >= height)
     return;
   
-  uint8_t res = 255;
+  uint8_t res0 = 255;
+  uint8_t res1 = 255;
+  uint8_t res2 = 255;
 
   if (yy >= 3) {
-    res = buffer[(yy - 3) * stride + xx * pixel_stride + idx];
+    res0 = buffer[(yy - 3) * stride + xx * pixel_stride];
+    res1 = buffer[(yy - 3) * stride + xx * pixel_stride + 1];
+    res2 = buffer[(yy - 3) * stride + xx * pixel_stride + 2];
   }
   for (int i = y - 2; i < y; ++i) {
     if (i >= 0) {
       for (int j = xx - 2; j <= xx +2; j++) {
         if (j >= 0 && j < width) {
-          res = min(res, buffer[i * stride + j * pixel_stride + idx]);
+          res0 = min(res0, buffer[i * stride + j * pixel_stride ]);
+          res1 = min(res1, buffer[i * stride + j * pixel_stride + 1]);
+          res2 = min(res2, buffer[i * stride + j * pixel_stride + 2]);
         }
       }
     }
   }
   for (int j = xx - 3; j <= xx + 3; j++) {
     if (j >= 0 && j < width) {
-        res = min(res, buffer[yy * stride + j * pixel_stride + idx]);
+        res0 = min(res0, buffer[yy * stride + j * pixel_stride ]);
+        res1 = min(res1, buffer[yy * stride + j * pixel_stride + 1]);
+        res2 = min(res2, buffer[yy * stride + j * pixel_stride + 2]);
     }
   }
   for (int i = y + 1; i <= y + 2; ++i) {
     if (i < width) {
       for (int j = xx - 2; j <= xx +2; j++) {
         if (j >= 0 && j < width) {
-          res = min(res, buffer[i * stride + j * pixel_stride + idx]);
+          res0 = min(res0, buffer[i * stride + j * pixel_stride ]);
+          res1 = min(res1, buffer[i * stride + j * pixel_stride + 1]);
+          res2 = min(res2, buffer[i * stride + j * pixel_stride + 2]);
         }
       }
     }
   }
   if (yy + 3 < width) {
-    res = min(res, buffer[(yy - 3) * stride + xx * pixel_stride + idx]);
+    res0 = min(res0, buffer[(yy - 3) * stride + xx * pixel_stride ]);
+    res1 = min(res1, buffer[(yy - 3) * stride + xx * pixel_stride + 1]);
+    res2 = min(res2, buffer[(yy - 3) * stride + xx * pixel_stride + 2]);
   }
 
-  //__syncthreads();
-  buffer[yy * stride + xx * pixel_stride + idx] = res;
-  //__syncthreads();
+  __syncthreads();
+  buffer[yy * stride + xx * pixel_stride] = res0;
+  buffer[yy * stride + xx * pixel_stride + 1] = res1;
+  buffer[yy * stride + xx * pixel_stride + 2] = res2;
+  __syncthreads();
 
-  res = 0;
+  res0 = 0;
+  res1 = 0;
+  res2 = 0;
 
   if (yy >= 3) {
-    res = buffer[(yy - 3) * stride + xx * pixel_stride + idx];
+    res0 = buffer[(yy - 3) * stride + xx * pixel_stride];
+    res1 = buffer[(yy - 3) * stride + xx * pixel_stride + 1];
+    res2 = buffer[(yy - 3) * stride + xx * pixel_stride + 2];
   }
   for (int i = y - 2; i < y; ++i) {
     if (i >= 0) {
       for (int j = xx - 2; j <= xx +2; j++) {
         if (j >= 0 && j < width) {
-          res = max(res, buffer[i * stride + j * pixel_stride + idx]);
+          res0 = max(res0, buffer[i * stride + j * pixel_stride ]);
+          res1 = max(res1, buffer[i * stride + j * pixel_stride + 1]);
+          res2 = max(res2, buffer[i * stride + j * pixel_stride + 2]);
         }
       }
     }
   }
   for (int j = xx - 3; j <= xx + 3; j++) {
     if (j >= 0 && j < width) {
-        res = max(res, buffer[yy * stride + j * pixel_stride + idx]);
+        res0 = max(res0, buffer[yy * stride + j * pixel_stride ]);
+        res1 = max(res1, buffer[yy * stride + j * pixel_stride + 1]);
+        res2 = max(res2, buffer[yy * stride + j * pixel_stride + 2]);
     }
   }
   for (int i = y + 1; i <= y + 2; ++i) {
     if (i < width) {
       for (int j = xx - 2; j <= xx +2; j++) {
         if (j >= 0 && j < width) {
-          res = max(res, buffer[i * stride + j * pixel_stride + idx]);
+          res0 = max(res0, buffer[i * stride + j * pixel_stride ]);
+          res1 = max(res1, buffer[i * stride + j * pixel_stride + 1]);
+          res2 = max(res2, buffer[i * stride + j * pixel_stride + 2]);
         }
       }
     }
   }
   if (yy + 3 < width) {
-    res = max(res, buffer[(yy - 3) * stride + xx * pixel_stride + idx]);
+    res0 = max(res0, buffer[(yy - 3) * stride + xx * pixel_stride ]);
+    res1 = max(res1, buffer[(yy - 3) * stride + xx * pixel_stride + 1]);
+    res2 = max(res2, buffer[(yy - 3) * stride + xx * pixel_stride + 2]);
   }
 }
 
