@@ -166,6 +166,10 @@ static void update_bg_model(uint8_t* buffer,
           last_timestamp = buffer_info->timestamp;
         }
     }
+  else
+    {
+      return;
+    }
 
   // Allocate memory for background model if not already allocated
   if (*bg_model == nullptr)
@@ -173,17 +177,11 @@ static void update_bg_model(uint8_t* buffer,
       *bg_model = (uint8_t*)malloc(height * stride);
     }
 
-  // Estimate background
-  if (is_median)
-    {
-      estimate_background_median(frame_samples, frame_samples_count,
-                                 buffer_info, *bg_model);
-    }
-  else
-    {
-      estimate_background_mean(frame_samples, frame_samples_count, buffer_info,
-                               *bg_model);
-    }
+// Estimate background
+#define _BE_FPARAMS frame_samples, frame_samples_count, buffer_info, *bg_model
+  is_median ? estimate_background_median(_BE_FPARAMS)
+            : estimate_background_mean(_BE_FPARAMS);
+#undef _BE_FPARAMS
 }
 
 void estimate_background_mean(uint8_t** buffers,
@@ -842,24 +840,15 @@ static void copy_buffer(uint8_t* buffer,
       // Copy buffer where mask is not false, otherwise copy fallback buffer
       for (int y = 0; y < height; ++y)
         {
-          uint8_t* lineptr = buffer + y * stride;
-          uint8_t* cpy_lineptr = *cpy_buffer + y * stride;
-          uint8_t* mask_lineptr = mask + y * stride;
-          uint8_t* fallback_lineptr = fallback_buffer + y * stride;
           for (int x = 0; x < width; ++x)
             {
-              rgb* mask_pxl = (rgb*)(mask_lineptr + x * pixel_stride);
-              if (mask_pxl->r != 0)
-                {
-                  std::memcpy(cpy_lineptr + x * pixel_stride,
-                              lineptr + x * pixel_stride, pixel_stride);
-                }
-              else
-                {
-                  std::memcpy(cpy_lineptr + x * pixel_stride,
-                              fallback_lineptr + x * pixel_stride,
-                              pixel_stride);
-                }
+              int step = y * stride + x * pixel_stride;
+#define PXL_POINTER(ptr) ((rgb*)(ptr + step))
+              std::memcpy(PXL_POINTER(*cpy_buffer),
+                          (PXL_POINTER(mask)->r ? PXL_POINTER(buffer)
+                                                : PXL_POINTER(fallback_buffer)),
+                          pixel_stride);
+#undef PXL_POINTER
             }
         }
     }

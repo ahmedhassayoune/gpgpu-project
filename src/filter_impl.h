@@ -8,8 +8,8 @@ extern "C"
 {
 #endif
 
-#define BG_SAMPLING_RATE 500
-#define BG_NUMBER_FRAMES 10
+#define BG_SAMPLING_RATE 500 // sampling rate in ms
+#define BG_NUMBER_FRAMES 10  // number of frames to sample
 
   struct frame_info
   {
