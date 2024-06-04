@@ -7,8 +7,6 @@
 #include <math.h>
 #include "logo.h"
 
-#define N_CHANNELS 3
-
 struct rgb
 {
   uint8_t r, g, b;
@@ -39,45 +37,60 @@ enum op_type
 
 /* prototypes */
 static void update_bg_model(uint8_t* buffer,
-                            frame_info* buffer_info,
+                            const frame_info* buffer_info,
                             uint8_t** bg_model,
                             uint8_t* mask,
                             bool is_median);
 
 static void _selection_sort(uint8_t* bytes, int start, int end, int step);
+#define _BE_FSIGN                                                              \
+  uint8_t **buffers, int buffers_amount, const frame_info *buffer_info,        \
+    uint8_t *out
+static void estimate_background_mean(_BE_FSIGN);
+static void estimate_background_median(_BE_FSIGN);
+#undef _BE_FSIGN
 
 static void rgbToXyz(float r, float g, float b, float& x, float& y, float& z);
 static void xyzToLab(float x, float y, float z, float& l, float& a, float& b);
+static void rgb_to_lab(uint8_t* reference_buffer,
+                       uint8_t* buffer,
+                       const frame_info* buffer_info);
 
 static inline void min_assign(rgb* lhs, rgb* rhs);
 static inline void max_assign(rgb* lhs, rgb* rhs);
 static void morphology_impl(uint8_t* buffer,
-                            frame_info* buffer_info,
+                            const frame_info* buffer_info,
                             uint8_t* output,
                             op_type op);
+static void opening_impl_inplace(uint8_t* buffer,
+                                 const frame_info* buffer_info);
 
 static void enqueue(Queue& q, int x, int y);
 static pos dequeue(Queue& q);
 static bool is_empty(Queue& q);
+static void apply_hysteresis_threshold(uint8_t* buffer,
+                                       const frame_info* buffer_info,
+                                       uint8_t low_threshold,
+                                       uint8_t high_threshold);
+
+static void
+apply_masking(uint8_t* buffer, const frame_info* buffer_info, uint8_t* mask);
 
 static void copy_buffer(uint8_t* buffer,
                         uint8_t** cpy_buffer,
-                        frame_info* buffer_info,
+                        const frame_info* buffer_info,
                         uint8_t* mask,
                         uint8_t* fallback_buffer);
 
 extern "C"
 {
-  void
-  filter_impl(uint8_t* buffer, frame_info* buffer_info, int th_low, int th_high)
+  void filter_impl(uint8_t* buffer,
+                   const frame_info* buffer_info,
+                   int th_low,
+                   int th_high)
   {
     // Set first frame as background model
     static uint8_t* bg_model = buffer;
-
-    int width = buffer_info->width;
-    int height = buffer_info->height;
-    int stride = buffer_info->stride;
-    int pixel_stride = buffer_info->pixel_stride;
 
     // Copy frame buffer
     uint8_t* cpy_buffer = nullptr;
@@ -108,7 +121,7 @@ extern "C"
 //******************************************************
 
 static void update_bg_model(uint8_t* buffer,
-                            frame_info* buffer_info,
+                            const frame_info* buffer_info,
                             uint8_t** bg_model,
                             uint8_t* mask,
                             bool is_median)
@@ -117,10 +130,8 @@ static void update_bg_model(uint8_t* buffer,
   static int frame_samples_count = 0;
   static double last_timestamp = 0.0;
 
-  int width = buffer_info->width;
   int height = buffer_info->height;
   int stride = buffer_info->stride;
-  int pixel_stride = buffer_info->pixel_stride;
 
   // First frame is set to the background model
   if (frame_samples_count == 0)
@@ -186,7 +197,7 @@ static void update_bg_model(uint8_t* buffer,
 
 void estimate_background_mean(uint8_t** buffers,
                               int buffers_amount,
-                              frame_info* buffer_info,
+                              const frame_info* buffer_info,
                               uint8_t* out)
 {
   // It is expected `out` has same stride values
@@ -249,7 +260,7 @@ static void _selection_sort(uint8_t* bytes, int start, int end, int step)
 
 void estimate_background_median(uint8_t** buffers,
                                 int buffers_amount,
-                                frame_info* buffer_info,
+                                const frame_info* buffer_info,
                                 uint8_t* out)
 {
   if (!buffers || !out)
@@ -363,7 +374,7 @@ static void xyzToLab(float x, float y, float z, float& l, float& a, float& b)
 
 void rgb_to_lab(uint8_t* reference_buffer,
                 uint8_t* buffer,
-                frame_info* buffer_info)
+                const frame_info* buffer_info)
 {
   int width = buffer_info->width;
   int height = buffer_info->height;
@@ -460,7 +471,7 @@ static inline void max_assign(rgb* lhs, rgb* rhs)
 }
 
 static void morphology_impl(uint8_t* input,
-                            frame_info* buffer_info,
+                            const frame_info* buffer_info,
                             uint8_t* output,
                             op_type op)
 {
@@ -594,7 +605,7 @@ static void morphology_impl(uint8_t* input,
     }
 }
 
-void opening_impl_inplace(uint8_t* buffer, frame_info* buffer_info)
+void opening_impl_inplace(uint8_t* buffer, const frame_info* buffer_info)
 {
   uint8_t* other_buffer =
     (uint8_t*)malloc(buffer_info->height * buffer_info->stride);
@@ -664,7 +675,7 @@ static bool is_empty(Queue& q) { return q.front == q.rear; }
  * @param high_threshold The higher threshold.
  */
 void apply_hysteresis_threshold(uint8_t* buffer,
-                                frame_info* buffer_info,
+                                const frame_info* buffer_info,
                                 uint8_t low_threshold,
                                 uint8_t high_threshold)
 {
@@ -770,7 +781,9 @@ void apply_hysteresis_threshold(uint8_t* buffer,
 //**                                                  **
 //******************************************************
 
-void apply_masking(uint8_t* buffer, frame_info* buffer_info, uint8_t* mask)
+void apply_masking(uint8_t* buffer,
+                   const frame_info* buffer_info,
+                   uint8_t* mask)
 {
   int width = buffer_info->width;
   int height = buffer_info->height;
@@ -816,7 +829,7 @@ void apply_masking(uint8_t* buffer, frame_info* buffer_info, uint8_t* mask)
 */
 static void copy_buffer(uint8_t* buffer,
                         uint8_t** cpy_buffer,
-                        frame_info* buffer_info,
+                        const frame_info* buffer_info,
                         uint8_t* mask,
                         uint8_t* fallback_buffer)
 {
