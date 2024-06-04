@@ -846,7 +846,7 @@ static void copy_buffer(uint8_t* buffer,
   if (mask == nullptr || fallback_buffer == nullptr)
     {
       // Copy buffer directly
-      std::memcpy(*cpy_buffer, buffer, height * stride);
+      std::memcpy((void*)(*cpy_buffer), (void*)buffer, height * stride);
     }
   else
     {
@@ -856,10 +856,11 @@ static void copy_buffer(uint8_t* buffer,
           for (int x = 0; x < width; ++x)
             {
               int step = y * stride + x * pixel_stride;
-#define PXL_POINTER(ptr) ((rgb*)(ptr + step))
+              bool mask_value = mask[step] != 0;
+#define PXL_POINTER(ptr) ((void*)(ptr + step))
               std::memcpy(PXL_POINTER(*cpy_buffer),
-                          (PXL_POINTER(mask)->r ? PXL_POINTER(buffer)
-                                                : PXL_POINTER(fallback_buffer)),
+                          mask_value ? PXL_POINTER(fallback_buffer)
+                                     : PXL_POINTER(buffer),
                           pixel_stride);
 #undef PXL_POINTER
             }
