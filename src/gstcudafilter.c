@@ -243,7 +243,21 @@ static GstFlowReturn gst_cuda_filter_transform_frame_ip(GstVideoFilter* filter,
   int plane_stride = GST_VIDEO_FRAME_PLANE_STRIDE(frame, 0);
   int pixel_stride = GST_VIDEO_FRAME_COMP_PSTRIDE(frame, 0);
 
-  filter_impl(pixels, width, height, plane_stride, pixel_stride);
+  // Get the frame timestamp
+  double frame_timestamp = 0.0;
+  GstBuffer* buffer = frame->buffer;
+  if (buffer) {
+    GstClockTime timestamp = GST_BUFFER_PTS(buffer);
+    frame_timestamp = (double) timestamp / GST_MSECOND;
+  }
+
+  // Set filter params
+  struct frame_info f_info = {width, height, plane_stride, pixel_stride, frame_timestamp};
+  int th_low = 3;
+  int th_high = 30;
+
+  // Apply filter
+  filter_impl(pixels, &f_info, th_low, th_high);
 
   return GST_FLOW_OK;
 }
