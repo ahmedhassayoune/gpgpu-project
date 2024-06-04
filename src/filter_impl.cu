@@ -74,10 +74,12 @@ __global__ void apply_threshold_on_marker(std::byte* buffer,
                                           size_t bpitch,
                                           bool* marker,
                                           size_t mpitch,
-                                          int width,
-                                          int height,
+                                          const frame_info* buffer_info,
                                           int high_threshold)
 {
+  int width = buffer_info->width;
+  int height = buffer_info->height;
+
   int y = blockIdx.y * blockDim.y + threadIdx.y;
   int x = blockIdx.x * blockDim.x + threadIdx.x;
 
@@ -100,8 +102,7 @@ __global__ void apply_threshold_on_marker(std::byte* buffer,
 /// @param opitch The pitch of the output buffer
 /// @param marker The marker buffer
 /// @param mpitch The pitch of the marker buffer
-/// @param width The width of the image
-/// @param height The height of the image
+/// @param buffer_info The buffer info
 /// @param low_threshold The low threshold
 /// @return
 __global__ void reconstruct_image(std::byte* buffer,
@@ -110,10 +111,12 @@ __global__ void reconstruct_image(std::byte* buffer,
                                   size_t opitch,
                                   bool* marker,
                                   size_t mpitch,
-                                  int width,
-                                  int height,
+                                  const frame_info* buffer_info,
                                   int low_threshold)
 {
+  int width = buffer_info->width;
+  int height = buffer_info->height;
+
   int y = blockIdx.y * blockDim.y + threadIdx.y;
   int x = blockIdx.x * blockDim.x + threadIdx.x;
 
@@ -191,18 +194,19 @@ namespace
 
   /// @brief Apply hysteresis thresholding on the buffer
   /// @param buffer The input buffer
-  /// @param width The width of the image
-  /// @param height The height of the image
   /// @param bpitch The pitch of the input buffer
+  /// @param buffer_info The buffer info
   /// @param low_threshold The low threshold
   /// @param high_threshold The high threshold
   void apply_hysteresis_threshold(std::byte* buffer,
-                                  int width,
-                                  int height,
                                   size_t bpitch,
+                                  const frame_info* buffer_info,
                                   int low_threshold,
                                   int high_threshold)
   {
+    int width = buffer_info->width;
+    int height = buffer_info->height;
+
     // Ensure low threshold is less than high threshold
     if (low_threshold > high_threshold)
       {
@@ -237,7 +241,7 @@ namespace
     dim3 gridSize((width + (blockSize.x - 1)) / blockSize.x,
                   (height + (blockSize.y - 1)) / blockSize.y);
     apply_threshold_on_marker<<<gridSize, blockSize>>>(
-      buffer, bpitch, marker, mpitch, width, height, high_threshold);
+      buffer, bpitch, marker, mpitch, buffer_info, high_threshold);
 
     err = cudaDeviceSynchronize();
     CHECK_CUDA_ERROR(err);
@@ -254,7 +258,7 @@ namespace
         CHECK_CUDA_ERROR(err);
 
         reconstruct_image<<<gridSize, blockSize>>>(
-          buffer, bpitch, out_buffer, opitch, marker, mpitch, width, height,
+          buffer, bpitch, out_buffer, opitch, marker, mpitch, buffer_info,
           low_threshold);
 
         err = cudaDeviceSynchronize();
