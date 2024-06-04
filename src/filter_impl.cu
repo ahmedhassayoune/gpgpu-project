@@ -6,6 +6,9 @@
 #include <thread>
 #include "logo.h"
 
+
+__constant__ float D65_XYZ[9];
+
 #define CHECK_CUDA_ERROR(val) check((val), #val, __FILE__, __LINE__)
 template <typename T>
 void check(T err,
@@ -83,6 +86,32 @@ namespace
         buffer.reset(ptr);
       }
   }
+
+  void rgb_to_lab_cuda(uint8_t* referenceBuffer, uint8_t* buffer, int width, int height, int stride, int pixelStride) {
+    float* distanceArray;
+    size_t distanceArraySize = width * height * sizeof(float);
+    cudaMalloc(&distanceArray, distanceArraySize);
+
+    dim3 blockSize(16, 16);
+    dim3 gridSize((width + blockSize.x - 1) / blockSize.x, (height + blockSize.y - 1) / blockSize.y);
+
+    rgbToLabDistanceKernel<<<gridSize, blockSize>>>(referenceBuffer, buffer, distanceArray, width, height, stride, pixelStride);
+    cudaDeviceSynchronize();
+
+    float* h_distanceArray = new float[width * height];
+    cudaMemcpy(h_distanceArray, distanceArray, distanceArraySize, cudaMemcpyDeviceToHost);
+    float maxDistance = 0.0f;
+    for (int i = 0; i < width * height; ++i) {
+        maxDistance = fmaxf(maxDistance, h_distanceArray[i]);
+    }
+    delete[] h_distanceArray;
+
+    normalizeAndConvertTo8bitKernel<<<gridSize, blockSize>>>(buffer, distanceArray, maxDistance, width, height, stride, pixelStride);
+    cudaDeviceSynchronize();
+
+    cudaFree(distanceArray);
+}
+
 } // namespace
 
 extern "C"
@@ -93,6 +122,13 @@ extern "C"
                    int src_stride,
                    int pixel_stride)
   {
+    const float h_D65_XYZ[9] = {
+    0.412453f, 0.357580f, 0.180423f,
+    0.212671f, 0.715160f, 0.072169f,
+    0.019334f, 0.119193f, 0.950227f
+    };
+
+    cudaMemcpyToSymbol(D65_XYZ, h_D65_XYZ, sizeof(h_D65_XYZ));
     load_logo();
 
     assert(sizeof(rgb) == pixel_stride);
@@ -142,9 +178,6 @@ extern "C"
 #include <cmath>
 #include <algorithm>
 
-struct rgb {
-    uint8_t r, g, b;
-};
 
 struct LAB {
     float l, a, b;
@@ -159,9 +192,12 @@ __device__ void rgbToXyz(float r, float g, float b, float& x, float& y, float& z
     g = g / 255.0f;
     b = b / 255.0f;
 
-    r = (r > 0.04045f) ? powf((r + 0.055f) / 1.055f, 2.4f) : (r / 12.92f);
-    g = (g > 0.04045f) ? powf((g + 0.055f) / 1.055f, 2.4f) : (g / 12.92f);
-    b = (b > 0.04045f) ? powf((b + 0.055f) / 1.055f, 2.4f) : (b / 12.92f);
+    #define GAMMA_CORRECT(x)                                                       \
+      ((x) > 0.04045f ? powf(((x) + 0.055f) / 1.055f, 2.4f) : (x) / 12.92f)
+      r = GAMMA_CORRECT(r);
+      g = GAMMA_CORRECT(g);
+      b = GAMMA_CORRECT(b);
+    #undef GAMMA_CORRECT
 
     x = r * D65_XYZ[0] + g * D65_XYZ[1] + b * D65_XYZ[2];
     y = r * D65_XYZ[3] + g * D65_XYZ[4] + b * D65_XYZ[5];
@@ -177,9 +213,12 @@ __device__ void xyzToLab(float x, float y, float z, float& l, float& a, float& b
     y /= D65_Yn;
     z /= D65_Zn;
 
-    float fx = (x > 0.008856f) ? powf(x, 1.0f / 3.0f) : (7.787f * x + 16.0f / 116.0f);
-    float fy = (y > 0.008856f) ? powf(y, 1.0f / 3.0f) : (7.787f * y + 16.0f / 116.0f);
-    float fz = (z > 0.008856f) ? powf(z, 1.0f / 3.0f) : (7.787f * z + 16.0f / 116.0f);
+    #define NONLINEAR(x)                                                           \
+      ((x) > 0.008856f ? powf(x, 1.0f / 3.0f) : (7.787f * x + 16.0f / 116.0f))
+      float fx = NONLINEAR(x);
+      float fy = NONLINEAR(x);
+      float fz = NONLINEAR(x);
+    #undef NONLINEAR
 
     l = (116.0f * fy) - 16.0f;
     a = 500.0f * (fx - fy);
@@ -195,7 +234,8 @@ __global__ void rgbToLabDistanceKernel(uint8_t* referenceBuffer, uint8_t* buffer
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     int y = blockIdx.y * blockDim.y + threadIdx.y;
 
-    if (x >= width || y >= height) return;
+    if (x >= width || y >= height)
+      return;
 
     uint8_t* lineptrReference = referenceBuffer + y * stride;
     uint8_t* lineptr = buffer + y * stride;
@@ -235,7 +275,8 @@ __global__ void normalizeAndConvertTo8bitKernel(uint8_t* buffer, float* distance
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     int y = blockIdx.y * blockDim.y + threadIdx.y;
 
-    if (x >= width || y >= height) return;
+    if (x >= width || y >= height)
+      return;
 
     uint8_t* lineptr = buffer + y * stride;
     rgb* pxl = (rgb*)(lineptr + x * pixelStride);
@@ -246,29 +287,4 @@ __global__ void normalizeAndConvertTo8bitKernel(uint8_t* buffer, float* distance
     pxl->r = distance8bit;
     pxl->g = distance8bit;
     pxl->b = distance8bit;
-}
-
-void rgb_to_lab_cuda(uint8_t* referenceBuffer, uint8_t* buffer, int width, int height, int stride, int pixelStride) {
-    float* distanceArray;
-    size_t distanceArraySize = width * height * sizeof(float);
-    cudaMalloc(&distanceArray, distanceArraySize);
-
-    dim3 blockSize(16, 16);
-    dim3 gridSize((width + blockSize.x - 1) / blockSize.x, (height + blockSize.y - 1) / blockSize.y);
-
-    rgbToLabDistanceKernel<<<gridSize, blockSize>>>(referenceBuffer, buffer, distanceArray, width, height, stride, pixelStride);
-    cudaDeviceSynchronize();
-
-    float* h_distanceArray = new float[width * height];
-    cudaMemcpy(h_distanceArray, distanceArray, distanceArraySize, cudaMemcpyDeviceToHost);
-    float maxDistance = 0.0f;
-    for (int i = 0; i < width * height; ++i) {
-        maxDistance = fmaxf(maxDistance, h_distanceArray[i]);
-    }
-    delete[] h_distanceArray;
-
-    normalizeAndConvertTo8bitKernel<<<gridSize, blockSize>>>(buffer, distanceArray, maxDistance, width, height, stride, pixelStride);
-    cudaDeviceSynchronize();
-
-    cudaFree(distanceArray);
 }
