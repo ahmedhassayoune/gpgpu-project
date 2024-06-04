@@ -280,14 +280,17 @@ namespace
 extern "C"
 {
   void filter_impl(uint8_t* src_buffer,
-                   int width,
-                   int height,
-                   int src_stride,
-                   int pixel_stride)
+                   const frame_info* buffer_info,
+                   int th_low,
+                   int th_high)
   {
+    int width = buffer_info->width;
+    int height = buffer_info->height;
+    int src_stride = buffer_info->stride;
+
     load_logo();
 
-    assert(sizeof(rgb) == pixel_stride);
+    assert(sizeof(rgb) == buffer_info->pixel_stride);
     std::byte* dBuffer;
     size_t pitch;
 
