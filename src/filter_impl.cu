@@ -88,30 +88,37 @@ namespace
   }
 
   void rgb_to_lab_cuda(uint8_t* referenceBuffer, uint8_t* buffer, int width, int height, int stride, int pixelStride) {
+    cudaError_t err;
     float* distanceArray;
-    size_t distanceArraySize = width * height * sizeof(float);
-    cudaMalloc(&distanceArray, distanceArraySize);
+    size_t dpitch;
+    
+    err = cudaMallocPitch(&distanceArray, &dpitch, width * sizeof(float), height);
+    CHECK_CUDA_ERROR(err);
 
     dim3 blockSize(16, 16);
     dim3 gridSize((width + blockSize.x - 1) / blockSize.x, (height + blockSize.y - 1) / blockSize.y);
 
-    rgbToLabDistanceKernel<<<gridSize, blockSize>>>(referenceBuffer, buffer, distanceArray, width, height, stride, pixelStride);
-    cudaDeviceSynchronize();
+    rgbToLabDistanceKernel<<<gridSize, blockSize>>>(reinterpret_cast<std::byte*>(referenceBuffer), stride, reinterpret_cast<std::byte*>(buffer), stride, distanceArray, dpitch, width, height);
+    err = cudaDeviceSynchronize();
+    CHECK_CUDA_ERROR(err);
 
     float* h_distanceArray = new float[width * height];
-    cudaMemcpy(h_distanceArray, distanceArray, distanceArraySize, cudaMemcpyDeviceToHost);
+    err = cudaMemcpy2D(h_distanceArray, width * sizeof(float), distanceArray, dpitch, width * sizeof(float), height, cudaMemcpyDeviceToHost);
+    CHECK_CUDA_ERROR(err);
+
     float maxDistance = 0.0f;
     for (int i = 0; i < width * height; ++i) {
         maxDistance = fmaxf(maxDistance, h_distanceArray[i]);
     }
     delete[] h_distanceArray;
 
-    normalizeAndConvertTo8bitKernel<<<gridSize, blockSize>>>(buffer, distanceArray, maxDistance, width, height, stride, pixelStride);
-    cudaDeviceSynchronize();
+    normalizeAndConvertTo8bitKernel<<<gridSize, blockSize>>>(reinterpret_cast<std::byte*>(buffer), stride, distanceArray, dpitch, maxDistance, width, height);
+    err = cudaDeviceSynchronize();
+    CHECK_CUDA_ERROR(err);
 
-    cudaFree(distanceArray);
+    err = cudaFree(distanceArray);
+    CHECK_CUDA_ERROR(err);
 }
-
 } // namespace
 
 extern "C"
@@ -177,6 +184,9 @@ extern "C"
 #include <iostream>
 #include <cmath>
 #include <algorithm>
+#include <cstddef>
+#include <cstdint>
+
 
 
 struct LAB {
@@ -225,22 +235,17 @@ __device__ void xyzToLab(float x, float y, float z, float& l, float& a, float& b
     b = 200.0f * (fy - fz);
 }
 
-__device__ float labDistance(const LAB& lab1, const LAB& lab2) {
-    return sqrtf(powf(lab1.l - lab2.l, 2) + powf(lab1.a - lab2.a, 2) + powf(lab1.b - lab2.b, 2));
-}
-
-__global__ void rgbToLabDistanceKernel(uint8_t* referenceBuffer, uint8_t* buffer, float* distanceArray,
-                                       int width, int height, int stride, int pixelStride) {
+__global__ void rgbToLabDistanceKernel(std::byte* referenceBuffer, size_t rpitch, std::byte* buffer, size_t bpitch, float* distanceArray, size_t dpitch, int width, int height) {
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     int y = blockIdx.y * blockDim.y + threadIdx.y;
 
     if (x >= width || y >= height)
-      return;
+        return;
 
-    uint8_t* lineptrReference = referenceBuffer + y * stride;
-    uint8_t* lineptr = buffer + y * stride;
+    std::byte* lineptrReference = referenceBuffer + y * rpitch;
+    std::byte* lineptr = buffer + y * bpitch;
 
-    rgb* pxlRef = (rgb*)(lineptrReference + x * pixelStride);
+    rgb* pxlRef = reinterpret_cast<rgb*>(lineptrReference + x * sizeof(rgb));
     float rRef = pxlRef->r;
     float gRef = pxlRef->g;
     float bRef = pxlRef->b;
@@ -253,7 +258,7 @@ __global__ void rgbToLabDistanceKernel(uint8_t* referenceBuffer, uint8_t* buffer
 
     LAB referenceLab = {LRef, ARef, BRef};
 
-    rgb* pxl = (rgb*)(lineptr + x * pixelStride);
+    rgb* pxl = reinterpret_cast<rgb*>(lineptr + x * sizeof(rgb));
     float r = pxl->r;
     float g = pxl->g;
     float b = pxl->b;
@@ -265,24 +270,62 @@ __global__ void rgbToLabDistanceKernel(uint8_t* referenceBuffer, uint8_t* buffer
     xyzToLab(X, Y, Z, L, A, B);
 
     LAB currentLab = {L, A, B};
-
-    float distance = labDistance(currentLab, referenceLab);
-    distanceArray[y * width + x] = distance;
+    #define LAB_DISTANCE(lab1, lab2)
+    (sqrtf(powf((lab1).l - (lab2).l, 2) + powf((lab1).a - (lab2).a, 2)
+         + powf((lab1).b - (lab2).b, 2)))
+          float distance = LAB_DISTANCE(currentLab, referenceLab);
+    #undef LAB_DISTANCE
+    float* distancePtr = reinterpret_cast<float*>(reinterpret_cast<std::byte*>(distanceArray) + y * dpitch);
+    distancePtr[x] = distance;
 }
 
-__global__ void normalizeAndConvertTo8bitKernel(uint8_t* buffer, float* distanceArray, float maxDistance,
-                                                int width, int height, int stride, int pixelStride) {
+
+void rgb_to_lab_cuda(uint8_t* referenceBuffer, uint8_t* buffer, int width, int height, int stride, int pixelStride) {
+    cudaError_t err;
+    float* distanceArray;
+    size_t distanceArraySize = width * height * sizeof(float);
+    
+    err = cudaMalloc(&distanceArray, distanceArraySize);
+    CHECK_CUDA_ERROR(err);
+
+    dim3 blockSize(16, 16);
+    dim3 gridSize((width + blockSize.x - 1) / blockSize.x, (height + blockSize.y - 1) / blockSize.y);
+
+    rgbToLabDistanceKernel<<<gridSize, blockSize>>>(reinterpret_cast<std::byte*>(referenceBuffer), stride, reinterpret_cast<std::byte*>(buffer), stride, distanceArray, width * sizeof(float), width, height);
+    err = cudaDeviceSynchronize();
+    CHECK_CUDA_ERROR(err);
+
+    float* h_distanceArray = new float[width * height];
+    err = cudaMemcpy(h_distanceArray, distanceArray, distanceArraySize, cudaMemcpyDeviceToHost);
+    CHECK_CUDA_ERROR(err);
+
+    float maxDistance = 0.0f;
+    for (int i = 0; i < width * height; ++i) {
+        maxDistance = fmaxf(maxDistance, h_distanceArray[i]);
+    }
+    delete[] h_distanceArray;
+
+    normalizeAndConvertTo8bitKernel<<<gridSize, blockSize>>>(reinterpret_cast<std::byte*>(buffer), stride, distanceArray, width * sizeof(float), maxDistance, width, height);
+    err = cudaDeviceSynchronize();
+    CHECK_CUDA_ERROR(err);
+
+    err = cudaFree(distanceArray);
+    CHECK_CUDA_ERROR(err);
+}
+__global__ void normalizeAndConvertTo8bitKernel(std::byte* buffer, size_t bpitch, float* distanceArray, size_t dpitch, float max_distance, int width, int height) {
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     int y = blockIdx.y * blockDim.y + threadIdx.y;
 
     if (x >= width || y >= height)
-      return;
+        return;
 
-    uint8_t* lineptr = buffer + y * stride;
-    rgb* pxl = (rgb*)(lineptr + x * pixelStride);
+    std::byte* lineptr = buffer + y * bpitch;
+    rgb* pxl = reinterpret_cast<rgb*>(lineptr + x * sizeof(rgb));
 
-    float distance = distanceArray[y * width + x];
-    uint8_t distance8bit = static_cast<uint8_t>(fminf(distance / maxDistance * 255.0f, 255.0f));
+    float* distancePtr = reinterpret_cast<float*>(reinterpret_cast<std::byte*>(distanceArray) + y * dpitch);
+    float distance = distancePtr[x];
+    
+    uint8_t distance8bit = static_cast<uint8_t>(fminf(distance / max_distance * 255.0f, 255.0f));
 
     pxl->r = distance8bit;
     pxl->g = distance8bit;
