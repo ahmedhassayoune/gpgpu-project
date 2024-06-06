@@ -89,10 +89,7 @@ __global__ void apply_threshold_on_marker(std::byte* buffer,
   rgb* buffer_line = (rgb*)(buffer + y * bpitch);
   bool* marker_line = (bool*)((std::byte*)marker + y * mpitch);
 
-  if (buffer_line[x].r > high_threshold)
-    {
-      marker_line[x] = true;
-    }
+  marker_line[x] = buffer_line[x].r > high_threshold;
 }
 
 /// @brief Reconstruct the hysteresis thresholding image from the marker
@@ -141,27 +138,23 @@ __global__ void reconstruct_image(std::byte* buffer,
     {
       for (int j = -1; j <= 1; j++)
         {
+          int ny = y + j;
+          int nx = x + i;
           // Skip the current pixel
-          if (i == 0 && j == 0)
+          if ((i == 0 && j == 0) || nx < 0 || nx >= width || ny < 0 || ny >= height)
             {
               continue;
             }
 
-          int ny = y + j;
-          int nx = x + i;
-
           // Check if the pixel is within the image boundaries
-          if (nx >= 0 && nx < width && ny >= 0 && ny < height)
+          rgb* buffer_line = (rgb*)(buffer + ny * bpitch);
+          bool* neighbor_marker_line =
+            (bool*)((std::byte*)marker + ny * mpitch);
+          if (!neighbor_marker_line[nx]
+              && buffer_line[nx].r > low_threshold)
             {
-              rgb* buffer_line = (rgb*)(buffer + ny * bpitch);
-              bool* neighbor_marker_line =
-                (bool*)((std::byte*)marker + ny * mpitch);
-              if (!neighbor_marker_line[nx]
-                  && buffer_line[nx].r > low_threshold)
-                {
-                  neighbor_marker_line[nx] = true;
-                  hysteresis_has_changed = true;
-                }
+              neighbor_marker_line[nx] = true;
+              hysteresis_has_changed = true;
             }
         }
     }
@@ -232,9 +225,6 @@ namespace
 
     // And set it to black
     err = cudaMemset2D(out_buffer, opitch, 0, width * sizeof(rgb), height);
-    CHECK_CUDA_ERROR(err);
-
-    err = cudaDeviceSynchronize();
     CHECK_CUDA_ERROR(err);
 
     dim3 blockSize(16, 16);
