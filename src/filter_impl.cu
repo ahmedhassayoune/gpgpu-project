@@ -22,6 +22,11 @@ void check(T err,
     }
 }
 
+struct rgb
+{
+  uint8_t r, g, b;
+};
+
 __constant__ uint8_t* logo;
 
 /// @brief Black out the red channel from the video and add EPITA's logo
@@ -74,8 +79,7 @@ __global__ void estimate_background_mean(_BE_FSIGN)
   if (xx >= width || yy >= height)
     return;
 
-  constexpr int N_CHANNELS = sizeof(rgb);
-  constexpr int PIXEL_STRIDE = N_CHANNELS;
+  constexpr size_t PIXEL_STRIDE = N_CHANNELS;
 
 #ifdef _BACKGROUND_ESTIMATION_MEAN_SPST
   // compute sum per channel
@@ -124,8 +128,7 @@ __global__ void estimate_background_median(_BE_FSIGN)
   if (xx >= width || yy >= height)
     return;
 
-  constexpr int N_CHANNELS = sizeof(rgb);
-  constexpr int PIXEL_STRIDE = N_CHANNELS;
+  constexpr size_t PIXEL_STRIDE = N_CHANNELS;
 
 #ifdef _BACKGROUND_ESTIMATION_MEDIAN_SPST
   // 3 channels, at most 42 buffers
