@@ -83,7 +83,7 @@ __global__ void morphological_erosion(uint8_t* buffer,
   if (yy >= 3) {
     res = *((unsigned int *) &buffer[(yy - 3) * stride + xx * pixel_stride]);
   }
-  for (int i = y - 2; i < y; ++i) {
+  for (int i = yy - 2; i < yy; ++i) {
     if (i >= 0) {
       for (int j = xx - 2; j <= xx +2; j++) {
         if (j >= 0 && j < width) {
@@ -97,7 +97,7 @@ __global__ void morphological_erosion(uint8_t* buffer,
         res = __vminu4(res, *((unsigned int *) &buffer[yy * stride + j * pixel_stride]));
     }
   }
-  for (int i = y + 1; i <= y + 2; ++i) {
+  for (int i = yy + 1; i <= yy + 2; ++i) {
     if (i < width) {
       for (int j = xx - 2; j <= xx +2; j++) {
         if (j >= 0 && j < width) {
@@ -134,7 +134,7 @@ __global__ void morphological_dilation(uint8_t* buffer,
   if (yy >= 3) {
     res = *((unsigned int *) &buffer[(yy - 3) * stride + xx * pixel_stride]);
   }
-  for (int i = y - 2; i < y; ++i) {
+  for (int i = yy - 2; i < yy; ++i) {
     if (i >= 0) {
       for (int j = xx - 2; j <= xx +2; j++) {
         if (j >= 0 && j < width) {
@@ -148,7 +148,7 @@ __global__ void morphological_dilation(uint8_t* buffer,
         res = __vmaxu4(res, *((unsigned int *) &buffer[yy * stride + j * pixel_stride]));
     }
   }
-  for (int i = y + 1; i <= y + 2; ++i) {
+  for (int i = yy + 1; i <= yy + 2; ++i) {
     if (i < width) {
       for (int j = xx - 2; j <= xx +2; j++) {
         if (j >= 0 && j < width) {
@@ -257,7 +257,7 @@ extern "C"
 
       uint8_t *gpu_intermediate_image;
       size_t gpu_intermediate_pitch;
-      cudaError_t err = cudaMallocPitch(&gpu_intermediate_image, &gpu_intermediate_pitch, width * pixel_stride * sizeof(uint8_t), height);
+      err = cudaMallocPitch(&gpu_intermediate_image, &gpu_intermediate_pitch, width * pixel_stride * sizeof(uint8_t), height);
       CHECK_CUDA_ERROR(err);
 
       dim3 blockSize(16, 16);
