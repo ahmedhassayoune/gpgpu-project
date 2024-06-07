@@ -64,10 +64,12 @@ remove_red_channel_inp(std::byte* buffer, int width, int height, int stride)
 
 
 
-__global__ void morphological_opening_inplace(uint8_t* buffer,
+__global__ void morphological_erosion(uint8_t* buffer,
+                                         uint8_t* output_buffer,
                                          int width,
                                          int height,
                                          int stride,
+                                         int output_stride,
                                          int pixel_stride)
 {
   int yy = blockIdx.y * blockDim.y + threadIdx.y;
@@ -108,15 +110,26 @@ __global__ void morphological_opening_inplace(uint8_t* buffer,
     res = __vminu4(res, *((unsigned int *) &buffer[(yy - 3) * stride + xx * pixel_stride]));
   }
 
-  
-
-  __syncthreads();
   for (int i = 0; i < 3; ++i) {
-    buffer[yy * stride + xx * pixel_stride + i] = ((uint8_t *) &res)[i];
+    output_buffer[yy * output_stride + xx * pixel_stride + i] = ((uint8_t *) &res)[i];
   }
-  __syncthreads();
+}
 
-  res = 0;
+__global__ void morphological_dilation(uint8_t* buffer,
+                                         uint8_t* output_buffer,
+                                         int width,
+                                         int height,
+                                         int stride,
+                                         int output_stride,
+                                         int pixel_stride)
+{
+  int yy = blockIdx.y * blockDim.y + threadIdx.y;
+  int xx = (blockIdx.x * blockDim.x + threadIdx.x);
+
+  if (xx >= width || yy >= height)
+    return;
+
+  unsigned int res = 0;
 
   if (yy >= 3) {
     res = *((unsigned int *) &buffer[(yy - 3) * stride + xx * pixel_stride]);
@@ -148,9 +161,8 @@ __global__ void morphological_opening_inplace(uint8_t* buffer,
     res = __vmaxu4(res, *((unsigned int *) &buffer[(yy - 3) * stride + xx * pixel_stride]));
   }
 
-  __syncthreads();
   for (int i = 0; i < 3; ++i) {
-    buffer[yy * stride + xx * pixel_stride + i] = ((uint8_t *) &res)[i];
+    output_buffer[yy * output_stride + xx * pixel_stride + i] = ((uint8_t *) &res)[i];
   }
 }
 
@@ -226,6 +238,56 @@ extern "C"
       using namespace std::chrono_literals;
       //std::this_thread::sleep_for(100ms);
     }
+  }
+
+  void opening_impl_inplace(uint8_t* buffer,
+                          int width,
+                          int height,
+                          int stride,
+                          int pixel_stride)
+  {
+      uint8_t *gpu_image;
+      size_t gpu_pitch;
+      cudaError_t err = cudaMallocPitch(&gpu_image, &gpu_pitch, width * pixel_stride * sizeof(uint8_t), height);
+      CHECK_CUDA_ERROR(err);
+
+      err = cudaMemcpy2D(gpu_image, gpu_pitch, buffer, stride,
+                        width * pixel_stride * sizeof(uint8_t), height, cudaMemcpyDeviceToHost );
+      CHECK_CUDA_ERROR(err);
+
+      uint8_t *gpu_intermediate_image;
+      size_t gpu_intermediate_pitch;
+      cudaError_t err = cudaMallocPitch(&gpu_intermediate_image, &gpu_intermediate_pitch, width * pixel_stride * sizeof(uint8_t), height);
+      CHECK_CUDA_ERROR(err);
+
+      dim3 blockSize(16, 16);
+      dim3 gridSize((width + (blockSize.x - 1)) / blockSize.x,
+                  (height + (blockSize.y - 1)) / blockSize.y);
+      
+      morphological_erosion<<<gridSize, blockSize>>>(gpu_image,
+                            gpu_intermediate_image,
+                            width,
+                            height,
+                            gpu_pitch,
+                            gpu_intermediate_pitch,
+                            pixel_stride);
+      err = cudaDeviceSynchronize();
+      CHECK_CUDA_ERROR(err);
+      
+      morphological_dilation<<<gridSize, blockSize>>>(gpu_intermediate_image,
+                            gpu_image,
+                            width,
+                            height,
+                            gpu_intermediate_pitch,
+                            gpu_pitch,
+                            pixel_stride);
+      err = cudaDeviceSynchronize();
+      CHECK_CUDA_ERROR(err);
+
+      err = cudaMemcpy2D(buffer, stride, gpu_image, gpu_pitch,
+                        width * pixel_stride * sizeof(uint8_t), height, cudaMemcpyHostToDevice );
+      CHECK_CUDA_ERROR(err);
+
   }
 
 
