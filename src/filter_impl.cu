@@ -22,11 +22,6 @@ void check(T err,
     }
 }
 
-struct rgb
-{
-  uint8_t r, g, b;
-};
-
 __constant__ uint8_t* logo;
 
 /// @brief Black out the red channel from the video and add EPITA's logo

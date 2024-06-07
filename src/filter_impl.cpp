@@ -7,11 +7,6 @@
 #include <math.h>
 #include "logo.h"
 
-struct rgb
-{
-  uint8_t r, g, b;
-};
-
 struct LAB
 {
   float l, a, b;
