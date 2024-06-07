@@ -78,41 +78,53 @@ __global__ void morphological_erosion(uint8_t* buffer,
   if (xx >= width || yy >= height)
     return;
 
-  unsigned int res = 0xFFFFFFFF;
+  uint8_t res0 = 0xFF;
+  uint8_t res1 = 0xFF;
+  uint8_t res2 = 0xFF;
 
   if (yy >= 3) {
-    res = *((unsigned int *) &buffer[(yy - 3) * stride + xx * pixel_stride]);
+    res0 = buffer[(yy - 3) * stride + xx * pixel_stride];
+    res1 = buffer[(yy - 3) * stride + xx * pixel_stride + 1];
+    res2 = buffer[(yy - 3) * stride + xx * pixel_stride + 2];
   }
   for (int i = yy - 2; i < yy; ++i) {
     if (i >= 0) {
       for (int j = xx - 2; j <= xx +2; j++) {
         if (j >= 0 && j < width) {
-          res = __vminu4(res, *((unsigned int *) &buffer[i * stride + j * pixel_stride]));
+          res0 = min(res0, buffer[i * stride + j * pixel_stride ]);
+          res1 = min(res1, buffer[i * stride + j * pixel_stride + 1]);
+          res2 = min(res2, buffer[i * stride + j * pixel_stride + 2]);
         }
       }
     }
   }
   for (int j = xx - 3; j <= xx + 3; j++) {
     if (j >= 0 && j < width) {
-        res = __vminu4(res, *((unsigned int *) &buffer[yy * stride + j * pixel_stride]));
+        res0 = min(res0, buffer[yy * stride + j * pixel_stride ]);
+        res1 = min(res1, buffer[yy * stride + j * pixel_stride + 1]);
+        res2 = min(res2, buffer[yy * stride + j * pixel_stride + 2]);
     }
   }
   for (int i = yy + 1; i <= yy + 2; ++i) {
     if (i < width) {
       for (int j = xx - 2; j <= xx +2; j++) {
         if (j >= 0 && j < width) {
-          res = __vminu4(res, *((unsigned int *) &buffer[i * stride + j * pixel_stride]));
+          res0 = min(res0, buffer[i * stride + j * pixel_stride ]);
+          res1 = min(res1, buffer[i * stride + j * pixel_stride + 1]);
+          res2 = min(res2, buffer[i * stride + j * pixel_stride + 2]);
         }
       }
     }
   }
   if (yy + 3 < width) {
-    res = __vminu4(res, *((unsigned int *) &buffer[(yy - 3) * stride + xx * pixel_stride]));
+    res0 = min(res0, buffer[(yy - 3) * stride + xx * pixel_stride ]);
+    res1 = min(res1, buffer[(yy - 3) * stride + xx * pixel_stride + 1]);
+    res2 = min(res2, buffer[(yy - 3) * stride + xx * pixel_stride + 2]);
   }
 
-  for (int i = 0; i < 3; ++i) {
-    output_buffer[yy * output_stride + xx * pixel_stride + i] = ((uint8_t *) &res)[i];
-  }
+  output_buffer[yy * output_stride + xx * pixel_stride] = res0;
+  output_buffer[yy * output_stride + xx * pixel_stride + 1] = res1;
+  output_buffer[yy * output_stride + xx * pixel_stride + 2] = res2;
 }
 
 __global__ void morphological_dilation(uint8_t* buffer,
@@ -129,41 +141,53 @@ __global__ void morphological_dilation(uint8_t* buffer,
   if (xx >= width || yy >= height)
     return;
 
-  unsigned int res = 0;
+  uint8_t res0 = 0x00;
+  uint8_t res1 = 0x00;
+  uint8_t res2 = 0x00;
 
   if (yy >= 3) {
-    res = *((unsigned int *) &buffer[(yy - 3) * stride + xx * pixel_stride]);
+    res0 = buffer[(yy - 3) * stride + xx * pixel_stride];
+    res1 = buffer[(yy - 3) * stride + xx * pixel_stride + 1];
+    res2 = buffer[(yy - 3) * stride + xx * pixel_stride + 2];
   }
   for (int i = yy - 2; i < yy; ++i) {
     if (i >= 0) {
       for (int j = xx - 2; j <= xx +2; j++) {
         if (j >= 0 && j < width) {
-          res = __vmaxu4(res, *((unsigned int *) &buffer[i * stride + j * pixel_stride]));
+          res0 = max(res0, buffer[i * stride + j * pixel_stride ]);
+          res1 = max(res1, buffer[i * stride + j * pixel_stride + 1]);
+          res2 = max(res2, buffer[i * stride + j * pixel_stride + 2]);
         }
       }
     }
   }
   for (int j = xx - 3; j <= xx + 3; j++) {
     if (j >= 0 && j < width) {
-        res = __vmaxu4(res, *((unsigned int *) &buffer[yy * stride + j * pixel_stride]));
+        res0 = max(res0, buffer[yy * stride + j * pixel_stride ]);
+        res1 = max(res1, buffer[yy * stride + j * pixel_stride + 1]);
+        res2 = max(res2, buffer[yy * stride + j * pixel_stride + 2]);
     }
   }
   for (int i = yy + 1; i <= yy + 2; ++i) {
     if (i < width) {
       for (int j = xx - 2; j <= xx +2; j++) {
         if (j >= 0 && j < width) {
-          res = __vmaxu4(res, *((unsigned int *) &buffer[i * stride + j * pixel_stride]));
+          res0 = max(res0, buffer[i * stride + j * pixel_stride ]);
+          res1 = max(res1, buffer[i * stride + j * pixel_stride + 1]);
+          res2 = max(res2, buffer[i * stride + j * pixel_stride + 2]);
         }
       }
     }
   }
   if (yy + 3 < width) {
-    res = __vmaxu4(res, *((unsigned int *) &buffer[(yy - 3) * stride + xx * pixel_stride]));
+    res0 = max(res0, buffer[(yy - 3) * stride + xx * pixel_stride ]);
+    res1 = max(res1, buffer[(yy - 3) * stride + xx * pixel_stride + 1]);
+    res2 = max(res2, buffer[(yy - 3) * stride + xx * pixel_stride + 2]);
   }
 
-  for (int i = 0; i < 3; ++i) {
-    output_buffer[yy * output_stride + xx * pixel_stride + i] = ((uint8_t *) &res)[i];
-  }
+  output_buffer[yy * output_stride + xx * pixel_stride] = res0;
+  output_buffer[yy * output_stride + xx * pixel_stride + 1] = res1;
+  output_buffer[yy * output_stride + xx * pixel_stride + 2] = res2;
 }
 
 namespace
