@@ -73,13 +73,11 @@ __global__ void apply_masking(std::byte* buffer,
   if (xx >= width || yy >= height)
     return;
 
-  constexpr int PIXEL_STRIDE = sizeof(rgb);
+  constexpr size_t PIXEL_STRIDE = N_CHANNELS;
   rgb* ipptr = (rgb*)(buffer + yy * bpitch + xx * PIXEL_STRIDE);
   rgb* mpptr = (rgb*)(mask + yy * mpitch + xx * PIXEL_STRIDE);
-  int red = ipptr->r;
-  red = red + (mpptr->r > 0) * red / 2;
-  red = red > 0xff ? 0xff : red;
-  ipptr->r = (uint8_t)(red);
+  int red = (int)ipptr->r + (mpptr->r > 0) * ipptr->r / 2;
+  ipptr->r = (uint8_t)(red > 0xff ? 0xff : red);
 }
 
 namespace
