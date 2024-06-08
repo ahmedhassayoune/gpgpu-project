@@ -64,8 +64,8 @@ remove_red_channel_inp(std::byte* buffer, int width, int height, int stride)
 
 
 
-__global__ void morphological_erosion(uint8_t* buffer,
-                                         uint8_t* output_buffer,
+__global__ void morphological_erosion(std::byte* buffer,
+                                         std::byte* output_buffer,
                                          int width,
                                          int height,
                                          int stride,
@@ -77,58 +77,57 @@ __global__ void morphological_erosion(uint8_t* buffer,
 
   if (xx >= width || yy >= height)
     return;
-
-  uint8_t res0 = 0xFF;
-  uint8_t res1 = 0xFF;
-  uint8_t res2 = 0xFF;
+  std::byte min_red = 0xFF;
+  std::byte min_green = 0xFF;
+  std::byte min_blue = 0xFF;
 
   if (yy >= 3) {
-    res0 = buffer[(yy - 3) * stride + xx * pixel_stride];
-    res1 = buffer[(yy - 3) * stride + xx * pixel_stride + 1];
-    res2 = buffer[(yy - 3) * stride + xx * pixel_stride + 2];
+    min_red = buffer[(yy - 3) * stride + xx * pixel_stride];
+    min_green = buffer[(yy - 3) * stride + xx * pixel_stride + 1];
+    min_blue = buffer[(yy - 3) * stride + xx * pixel_stride + 2];
   }
   for (int i = yy - 2; i < yy; ++i) {
     if (i >= 0) {
       for (int j = xx - 2; j <= xx +2; j++) {
         if (j >= 0 && j < width) {
-          res0 = min(res0, buffer[i * stride + j * pixel_stride ]);
-          res1 = min(res1, buffer[i * stride + j * pixel_stride + 1]);
-          res2 = min(res2, buffer[i * stride + j * pixel_stride + 2]);
+          min_red = min(min_red, buffer[i * stride + j * pixel_stride ]);
+          min_green = min(min_green, buffer[i * stride + j * pixel_stride + 1]);
+          min_blue = min(min_blue, buffer[i * stride + j * pixel_stride + 2]);
         }
       }
     }
   }
   for (int j = xx - 3; j <= xx + 3; j++) {
     if (j >= 0 && j < width) {
-        res0 = min(res0, buffer[yy * stride + j * pixel_stride ]);
-        res1 = min(res1, buffer[yy * stride + j * pixel_stride + 1]);
-        res2 = min(res2, buffer[yy * stride + j * pixel_stride + 2]);
+        min_red = min(min_red, buffer[yy * stride + j * pixel_stride ]);
+        min_green = min(min_green, buffer[yy * stride + j * pixel_stride + 1]);
+        min_blue = min(min_blue, buffer[yy * stride + j * pixel_stride + 2]);
     }
   }
   for (int i = yy + 1; i <= yy + 2; ++i) {
     if (i < width) {
       for (int j = xx - 2; j <= xx +2; j++) {
         if (j >= 0 && j < width) {
-          res0 = min(res0, buffer[i * stride + j * pixel_stride ]);
-          res1 = min(res1, buffer[i * stride + j * pixel_stride + 1]);
-          res2 = min(res2, buffer[i * stride + j * pixel_stride + 2]);
+          min_red = min(min_red, buffer[i * stride + j * pixel_stride ]);
+          min_green = min(min_green, buffer[i * stride + j * pixel_stride + 1]);
+          min_blue = min(min_blue, buffer[i * stride + j * pixel_stride + 2]);
         }
       }
     }
   }
   if (yy + 3 < width) {
-    res0 = min(res0, buffer[(yy - 3) * stride + xx * pixel_stride ]);
-    res1 = min(res1, buffer[(yy - 3) * stride + xx * pixel_stride + 1]);
-    res2 = min(res2, buffer[(yy - 3) * stride + xx * pixel_stride + 2]);
+    min_red = min(min_red, buffer[(yy - 3) * stride + xx * pixel_stride ]);
+    min_green = min(min_green, buffer[(yy - 3) * stride + xx * pixel_stride + 1]);
+    min_blue = min(min_blue, buffer[(yy - 3) * stride + xx * pixel_stride + 2]);
   }
 
-  output_buffer[yy * output_stride + xx * pixel_stride] = res0;
-  output_buffer[yy * output_stride + xx * pixel_stride + 1] = res1;
-  output_buffer[yy * output_stride + xx * pixel_stride + 2] = res2;
+  output_buffer[yy * output_stride + xx * pixel_stride] = min_red;
+  output_buffer[yy * output_stride + xx * pixel_stride + 1] = min_green;
+  output_buffer[yy * output_stride + xx * pixel_stride + 2] = min_blue;
 }
 
-__global__ void morphological_dilation(uint8_t* buffer,
-                                         uint8_t* output_buffer,
+__global__ void morphological_dilation(std::byte* buffer,
+                                         std::byte* output_buffer,
                                          int width,
                                          int height,
                                          int stride,
@@ -141,53 +140,53 @@ __global__ void morphological_dilation(uint8_t* buffer,
   if (xx >= width || yy >= height)
     return;
 
-  uint8_t res0 = 0x00;
-  uint8_t res1 = 0x00;
-  uint8_t res2 = 0x00;
+  std::byte max_red = 0x00;
+  std::byte max_green = 0x00;
+  std::byte max_blue = 0x00;
 
   if (yy >= 3) {
-    res0 = buffer[(yy - 3) * stride + xx * pixel_stride];
-    res1 = buffer[(yy - 3) * stride + xx * pixel_stride + 1];
-    res2 = buffer[(yy - 3) * stride + xx * pixel_stride + 2];
+    max_red = buffer[(yy - 3) * stride + xx * pixel_stride];
+    max_green = buffer[(yy - 3) * stride + xx * pixel_stride + 1];
+    max_blue = buffer[(yy - 3) * stride + xx * pixel_stride + 2];
   }
   for (int i = yy - 2; i < yy; ++i) {
     if (i >= 0) {
       for (int j = xx - 2; j <= xx +2; j++) {
         if (j >= 0 && j < width) {
-          res0 = max(res0, buffer[i * stride + j * pixel_stride ]);
-          res1 = max(res1, buffer[i * stride + j * pixel_stride + 1]);
-          res2 = max(res2, buffer[i * stride + j * pixel_stride + 2]);
+          max_red = max(max_red, buffer[i * stride + j * pixel_stride ]);
+          max_green = max(max_green, buffer[i * stride + j * pixel_stride + 1]);
+          max_blue = max(max_blue, buffer[i * stride + j * pixel_stride + 2]);
         }
       }
     }
   }
   for (int j = xx - 3; j <= xx + 3; j++) {
     if (j >= 0 && j < width) {
-        res0 = max(res0, buffer[yy * stride + j * pixel_stride ]);
-        res1 = max(res1, buffer[yy * stride + j * pixel_stride + 1]);
-        res2 = max(res2, buffer[yy * stride + j * pixel_stride + 2]);
+        max_red = max(max_red, buffer[yy * stride + j * pixel_stride ]);
+        max_green = max(max_green, buffer[yy * stride + j * pixel_stride + 1]);
+        max_blue = max(max_blue, buffer[yy * stride + j * pixel_stride + 2]);
     }
   }
   for (int i = yy + 1; i <= yy + 2; ++i) {
     if (i < width) {
       for (int j = xx - 2; j <= xx +2; j++) {
         if (j >= 0 && j < width) {
-          res0 = max(res0, buffer[i * stride + j * pixel_stride ]);
-          res1 = max(res1, buffer[i * stride + j * pixel_stride + 1]);
-          res2 = max(res2, buffer[i * stride + j * pixel_stride + 2]);
+          max_red = max(max_red, buffer[i * stride + j * pixel_stride ]);
+          max_green = max(max_green, buffer[i * stride + j * pixel_stride + 1]);
+          max_blue = max(max_blue, buffer[i * stride + j * pixel_stride + 2]);
         }
       }
     }
   }
   if (yy + 3 < width) {
-    res0 = max(res0, buffer[(yy - 3) * stride + xx * pixel_stride ]);
-    res1 = max(res1, buffer[(yy - 3) * stride + xx * pixel_stride + 1]);
-    res2 = max(res2, buffer[(yy - 3) * stride + xx * pixel_stride + 2]);
+    max_red = max(max_red, buffer[(yy - 3) * stride + xx * pixel_stride ]);
+    max_green = max(max_green, buffer[(yy - 3) * stride + xx * pixel_stride + 1]);
+    max_blue = max(max_blue, buffer[(yy - 3) * stride + xx * pixel_stride + 2]);
   }
 
-  output_buffer[yy * output_stride + xx * pixel_stride] = res0;
-  output_buffer[yy * output_stride + xx * pixel_stride + 1] = res1;
-  output_buffer[yy * output_stride + xx * pixel_stride + 2] = res2;
+  output_buffer[yy * output_stride + xx * pixel_stride] = max_red;
+  output_buffer[yy * output_stride + xx * pixel_stride + 1] = max_green;
+  output_buffer[yy * output_stride + xx * pixel_stride + 2] = max_blue;
 }
 
 namespace
@@ -264,24 +263,24 @@ extern "C"
     }
   }
 
-  void opening_impl_inplace(uint8_t* buffer,
+  void opening_impl_inplace(std::byte* buffer,
                           int width,
                           int height,
                           int stride,
                           int pixel_stride)
   {
-      uint8_t *gpu_image;
+      std::byte *gpu_image;
       size_t gpu_pitch;
-      cudaError_t err = cudaMallocPitch(&gpu_image, &gpu_pitch, width * pixel_stride * sizeof(uint8_t), height);
+      cudaError_t err = cudaMallocPitch(&gpu_image, &gpu_pitch, width * pixel_stride * sizeof(std::byte), height);
       CHECK_CUDA_ERROR(err);
 
       err = cudaMemcpy2D(gpu_image, gpu_pitch, buffer, stride,
-                        width * pixel_stride * sizeof(uint8_t), height, cudaMemcpyDeviceToHost );
+                        width * pixel_stride * sizeof(std::byte), height, cudaMemcpyDeviceToHost );
       CHECK_CUDA_ERROR(err);
 
-      uint8_t *gpu_intermediate_image;
+      std::byte *gpu_intermediate_image;
       size_t gpu_intermediate_pitch;
-      err = cudaMallocPitch(&gpu_intermediate_image, &gpu_intermediate_pitch, width * pixel_stride * sizeof(uint8_t), height);
+      err = cudaMallocPitch(&gpu_intermediate_image, &gpu_intermediate_pitch, width * pixel_stride * sizeof(std::byte), height);
       CHECK_CUDA_ERROR(err);
 
       dim3 blockSize(16, 16);
@@ -309,7 +308,7 @@ extern "C"
       CHECK_CUDA_ERROR(err);
 
       err = cudaMemcpy2D(buffer, stride, gpu_image, gpu_pitch,
-                        width * pixel_stride * sizeof(uint8_t), height, cudaMemcpyHostToDevice );
+                        width * pixel_stride * sizeof(std::byte), height, cudaMemcpyHostToDevice );
       CHECK_CUDA_ERROR(err);
 
   }
