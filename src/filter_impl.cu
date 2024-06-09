@@ -172,7 +172,7 @@ __global__ void apply_masking(std::byte* buffer,
 {
   int xx = blockIdx.x * blockDim.x + threadIdx.x;
   int yy = blockIdx.y * blockDim.y + threadIdx.y;
-  
+
   if (xx >= width || yy >= height)
     return;
 
