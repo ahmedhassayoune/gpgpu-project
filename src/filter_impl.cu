@@ -157,6 +157,32 @@ __global__ void estimate_background_median(_BE_FSIGN)
 
 #undef _BE_FSIGN
 
+//******************************************************
+//**                                                  **
+//**                Apply Masking                     **
+//**                                                  **
+//******************************************************
+
+__global__ void apply_masking(std::byte* buffer,
+                              size_t bpitch,
+                              std::byte* mask,
+                              size_t mpitch,
+                              int width,
+                              int height)
+{
+  int xx = blockIdx.x * blockDim.x + threadIdx.x;
+  int yy = blockIdx.y * blockDim.y + threadIdx.y;
+  
+  if (xx >= width || yy >= height)
+    return;
+
+  constexpr size_t PIXEL_STRIDE = N_CHANNELS;
+  rgb* ipptr = (rgb*)(buffer + yy * bpitch + xx * PIXEL_STRIDE);
+  rgb* mpptr = (rgb*)(mask + yy * mpitch + xx * PIXEL_STRIDE);
+  int red = (int)ipptr->r + (mpptr->r > 0) * ipptr->r / 2;
+  ipptr->r = (uint8_t)(red > 0xff ? 0xff : red);
+}
+
 namespace
 {
   void load_logo()
