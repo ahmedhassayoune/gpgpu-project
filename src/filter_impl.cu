@@ -56,6 +56,109 @@ remove_red_channel_inp(std::byte* buffer, int width, int height, int stride)
 
 //******************************************************
 //**                                                  **
+//**               Background Estimation              **
+//**                                                  **
+//******************************************************
+
+#define _BE_FSIGN                                                              \
+  std::byte **buffers, size_t *bpitches, int buffers_amount, std::byte *out,   \
+    size_t opitch, int width, int height
+
+__global__ void estimate_background_mean(_BE_FSIGN)
+{
+#define _BACKGROUND_ESTIMATION_MEAN_SPST // single position single thread
+
+  int yy = blockIdx.y * blockDim.y + threadIdx.y;
+  int xx = blockIdx.x * blockDim.x + threadIdx.x;
+
+  if (xx >= width || yy >= height)
+    return;
+
+  constexpr size_t PIXEL_STRIDE = N_CHANNELS;
+
+#ifdef _BACKGROUND_ESTIMATION_MEAN_SPST
+  // compute sum per channel
+  int sums[N_CHANNELS] = {0};
+  std::byte* ptr;
+  for (int ii = 0; ii < buffers_amount; ++ii)
+    {
+      ptr = buffers[ii] + yy * bpitches[ii] + xx * PIXEL_STRIDE;
+      for (int jj = 0; jj < N_CHANNELS; ++jj)
+        sums[jj] += (int)ptr[jj];
+    }
+
+  // compute mean per channel
+  ptr = out + yy * opitch + xx * PIXEL_STRIDE;
+  for (int ii = 0; ii < N_CHANNELS; ++ii)
+    ptr[ii] = (std::byte)(sums[ii] / buffers_amount);
+#else
+#endif
+
+#undef _BACKGROUND_ESTIMATION_MEAN_SPST
+}
+
+__device__ void _insertion_sort(std::byte* arr, int start, int end, int step)
+{
+  for (int ii = start + step; ii < end; ii += step)
+    {
+      int jj = ii;
+
+      while (jj > start && arr[jj - step] > arr[jj])
+        {
+          std::byte tmp = arr[jj - step];
+          arr[jj - step] = arr[jj];
+          arr[jj] = tmp;
+          jj -= step;
+        }
+    }
+}
+
+__global__ void estimate_background_median(_BE_FSIGN)
+{
+#define _BACKGROUND_ESTIMATION_MEDIAN_SPST // single position single thread
+
+  int yy = blockIdx.y * blockDim.y + threadIdx.y;
+  int xx = blockIdx.x * blockDim.x + threadIdx.x;
+
+  if (xx >= width || yy >= height)
+    return;
+
+  constexpr size_t PIXEL_STRIDE = N_CHANNELS;
+
+#ifdef _BACKGROUND_ESTIMATION_MEDIAN_SPST
+  // 3 channels, at most 42 buffers
+  // 4 channels, at most 32 buffers
+  std::byte B[128];
+
+  // for each buffer, store pixel at (yy, xx)
+  for (int ii = 0; ii < buffers_amount; ++ii)
+    {
+      std::byte* ptr = buffers[ii] + yy * bpitches[ii] + xx * PIXEL_STRIDE;
+      int jj = ii * N_CHANNELS;
+      for (int kk = 0; kk < N_CHANNELS; ++kk)
+        B[jj + kk] = ptr[kk];
+    }
+
+  // the median is computed for each channel
+  for (int ii = 0; ii < N_CHANNELS; ++ii)
+    _insertion_sort(B, ii, buffers_amount * N_CHANNELS, N_CHANNELS);
+
+  // select mid
+  // not treating differently even and odd `buffers_amount`
+  // in order to avoid if clause inside a kernel
+  std::byte* ptr = out + yy * opitch + xx * PIXEL_STRIDE;
+  for (int ii = 0; ii < N_CHANNELS; ++ii)
+    ptr[ii] = B[(buffers_amount / 2) * N_CHANNELS + ii];
+#else
+#endif
+
+#undef _BACKGROUND_ESTIMATION_MEDIAN_SPST
+}
+
+#undef _BE_FSIGN
+
+//******************************************************
+//**                                                  **
 //**                Apply Masking                     **
 //**                                                  **
 //******************************************************
@@ -69,7 +172,7 @@ __global__ void apply_masking(std::byte* buffer,
 {
   int xx = blockIdx.x * blockDim.x + threadIdx.x;
   int yy = blockIdx.y * blockDim.y + threadIdx.y;
-
+  
   if (xx >= width || yy >= height)
     return;
 
