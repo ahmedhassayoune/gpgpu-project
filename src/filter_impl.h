@@ -10,7 +10,13 @@ extern "C"
 
 #define BG_SAMPLING_RATE 500 // sampling rate in ms
 #define BG_NUMBER_FRAMES 10  // number of frames to sample
-#define N_CHANNELS 3
+
+  struct rgb
+  {
+    uint8_t r, g, b;
+  };
+
+  constexpr size_t N_CHANNELS = sizeof(rgb);
 
   struct frame_info
   {
