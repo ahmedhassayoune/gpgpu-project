@@ -245,7 +245,8 @@ __global__ void reconstruct_image(std::byte* buffer,
           int ny = y + j;
           int nx = x + i;
           // Skip the current pixel
-          if ((i == 0 && j == 0) || nx < 0 || nx >= width || ny < 0 || ny >= height)
+          if ((i == 0 && j == 0) || nx < 0 || nx >= width || ny < 0
+              || ny >= height)
             {
               continue;
             }
@@ -254,8 +255,7 @@ __global__ void reconstruct_image(std::byte* buffer,
           rgb* buffer_line = (rgb*)(buffer + ny * bpitch);
           bool* neighbor_marker_line =
             (bool*)((std::byte*)marker + ny * mpitch);
-          if (!neighbor_marker_line[nx]
-              && buffer_line[nx].r > low_threshold)
+          if (!neighbor_marker_line[nx] && buffer_line[nx].r > low_threshold)
             {
               neighbor_marker_line[nx] = true;
               hysteresis_has_changed = true;
@@ -289,7 +289,6 @@ __global__ void apply_masking(std::byte* buffer,
   int red = (int)ipptr->r + (mpptr->r > 0) * ipptr->r / 2;
   ipptr->r = (uint8_t)(red > 0xff ? 0xff : red);
 }
-
 
 namespace
 {
@@ -384,9 +383,9 @@ namespace
                              sizeof(h_hysteresis_has_changed));
         CHECK_CUDA_ERROR(err);
 
-        reconstruct_image<<<gridSize, blockSize>>>(
-          buffer, bpitch, out_buffer, opitch, marker, mpitch, buffer_info,
-          low_threshold);
+        reconstruct_image<<<gridSize, blockSize>>>(buffer, bpitch, out_buffer,
+                                                   opitch, marker, mpitch,
+                                                   buffer_info, low_threshold);
 
         err = cudaDeviceSynchronize();
         CHECK_CUDA_ERROR(err);
