@@ -6,7 +6,6 @@
 #include <thread>
 #include "logo.h"
 
-
 #define CHECK_CUDA_ERROR(val) check((val), #val, __FILE__, __LINE__)
 template <typename T>
 void check(T err,
@@ -27,7 +26,6 @@ __constant__ uint8_t* logo;
 __constant__ float D65_XYZ[9];
 
 __device__ bool hysteresis_has_changed;
-
 
 /// @brief Black out the red channel from the video and add EPITA's logo
 /// @param buffer
@@ -255,7 +253,7 @@ __global__ void rgbToLabDistanceKernel(std::byte* referenceBuffer,
 #define LAB_DISTANCE(lab1, lab2)                                               \
   (sqrtf(powf((lab1).l - (lab2).l, 2) + powf((lab1).a - (lab2).a, 2)           \
          + powf((lab1).b - (lab2).b, 2)))
-          float distance = LAB_DISTANCE(currentLab, referenceLab);
+  float distance = LAB_DISTANCE(currentLab, referenceLab);
 #undef LAB_DISTANCE
   float* distancePtr = reinterpret_cast<float*>(
     reinterpret_cast<std::byte*>(distanceArray) + y * dpitch);
@@ -476,8 +474,8 @@ namespace
                   (height + blockSize.y - 1) / blockSize.y);
 
     rgbToLabDistanceKernel<<<gridSize, blockSize>>>(
-      referenceBuffer, rpitch,
-      buffer, bpitch, distanceArray, dpitch, buffer_info);
+      referenceBuffer, rpitch, buffer, bpitch, distanceArray, dpitch,
+      buffer_info);
     err = cudaDeviceSynchronize();
     CHECK_CUDA_ERROR(err);
 
@@ -495,8 +493,7 @@ namespace
     delete[] h_distanceArray;
 
     normalizeAndConvertTo8bitKernel<<<gridSize, blockSize>>>(
-      buffer, bpitch, distanceArray, dpitch,
-      maxDistance, buffer_info);
+      buffer, bpitch, distanceArray, dpitch, maxDistance, buffer_info);
     err = cudaDeviceSynchronize();
     CHECK_CUDA_ERROR(err);
 
