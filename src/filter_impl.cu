@@ -300,13 +300,13 @@ __global__ void morphological_erosion(std::byte* buffer,
                                       size_t bpitch,
                                       std::byte* output_buffer,
                                       size_t opitch,
-                                      frame_info* buffer_info)
+                                      const frame_info* buffer_info)
 {
   int width = buffer_info->width;
   int height = buffer_info->height;
 
   int yy = blockIdx.y * blockDim.y + threadIdx.y;
-  int xx = (blockIdx.x * blockDim.x + threadIdx.x);
+  int xx = blockIdx.x * blockDim.x + threadIdx.x;
 
   if (xx >= width || yy >= height)
     return;
@@ -314,79 +314,68 @@ __global__ void morphological_erosion(std::byte* buffer,
   std::byte min_green = std::byte(0xff);
   std::byte min_blue = std::byte(0xff);
 
-  if (yy >= 3)
+  // Compute the minimum value in the 5x5 neighborhood
+  for (int j = yy - 2; j <= yy + 2; j++)
     {
-      min_red = buffer[(yy - 3) * bpitch + xx * N_CHANNELS];
-      min_green = buffer[(yy - 3) * bpitch + xx * N_CHANNELS + 1];
-      min_blue = buffer[(yy - 3) * bpitch + xx * N_CHANNELS + 2];
-    }
-  for (int i = yy - 2; i < yy; ++i)
-    {
-      if (i >= 0)
+      for (int i = xx - 2; i <= xx + 2; i++)
         {
-          for (int j = xx - 2; j <= xx + 2; j++)
+          if (i >= 0 && i < width && j >= 0 && j < height)
             {
-              if (j >= 0 && j < width)
-                {
-                  min_red = min(min_red, buffer[i * bpitch + j * N_CHANNELS]);
-                  min_green =
-                    min(min_green, buffer[i * bpitch + j * N_CHANNELS + 1]);
-                  min_blue =
-                    min(min_blue, buffer[i * bpitch + j * N_CHANNELS + 2]);
-                }
+              min_red = min(min_red, buffer[j * bpitch + i * N_CHANNELS]);
+              min_green =
+                min(min_green, buffer[j * bpitch + i * N_CHANNELS + 1]);
+              min_blue = min(min_blue, buffer[j * bpitch + i * N_CHANNELS + 2]);
             }
         }
-    }
-  for (int j = xx - 3; j <= xx + 3; j++)
-    {
-      if (j >= 0 && j < width)
-        {
-          min_red = min(min_red, buffer[yy * bpitch + j * N_CHANNELS]);
-          min_green = min(min_green, buffer[yy * bpitch + j * N_CHANNELS + 1]);
-          min_blue = min(min_blue, buffer[yy * bpitch + j * N_CHANNELS + 2]);
-        }
-    }
-  for (int i = yy + 1; i <= yy + 2; ++i)
-    {
-      if (i < width)
-        {
-          for (int j = xx - 2; j <= xx + 2; j++)
-            {
-              if (j >= 0 && j < width)
-                {
-                  min_red = min(min_red, buffer[i * bpitch + j * N_CHANNELS]);
-                  min_green =
-                    min(min_green, buffer[i * bpitch + j * N_CHANNELS + 1]);
-                  min_blue =
-                    min(min_blue, buffer[i * bpitch + j * N_CHANNELS + 2]);
-                }
-            }
-        }
-    }
-  if (yy + 3 < width)
-    {
-      min_red = min(min_red, buffer[(yy - 3) * bpitch + xx * N_CHANNELS]);
-      min_green =
-        min(min_green, buffer[(yy - 3) * bpitch + xx * N_CHANNELS + 1]);
-      min_blue = min(min_blue, buffer[(yy - 3) * bpitch + xx * N_CHANNELS + 2]);
     }
 
-  output_buffer[yy * opitch + xx * N_CHANNELS] = min_red;
-  output_buffer[yy * opitch + xx * N_CHANNELS + 1] = min_green;
-  output_buffer[yy * opitch + xx * N_CHANNELS + 2] = min_blue;
+  // Compute the minimum value in the extremities
+  if (xx - 3 >= 0)
+    {
+      int i = xx - 3;
+      min_red = min(min_red, buffer[yy * bpitch + i * N_CHANNELS]);
+      min_green = min(min_green, buffer[yy * bpitch + i * N_CHANNELS + 1]);
+      min_blue = min(min_blue, buffer[yy * bpitch + i * N_CHANNELS + 2]);
+    }
+  if (xx + 3 < width)
+    {
+      int i = xx + 3;
+      min_red = min(min_red, buffer[yy * bpitch + i * N_CHANNELS]);
+      min_green = min(min_green, buffer[yy * bpitch + i * N_CHANNELS + 1]);
+      min_blue = min(min_blue, buffer[yy * bpitch + i * N_CHANNELS + 2]);
+    }
+  if (yy - 3 >= 0)
+    {
+      int j = yy - 3;
+      min_red = min(min_red, buffer[j * bpitch + xx * N_CHANNELS]);
+      min_green = min(min_green, buffer[j * bpitch + xx * N_CHANNELS + 1]);
+      min_blue = min(min_blue, buffer[j * bpitch + xx * N_CHANNELS + 2]);
+    }
+  if (yy + 3 < height)
+    {
+      int j = yy + 3;
+      min_red = min(min_red, buffer[j * bpitch + xx * N_CHANNELS]);
+      min_green = min(min_green, buffer[j * bpitch + xx * N_CHANNELS + 1]);
+      min_blue = min(min_blue, buffer[j * bpitch + xx * N_CHANNELS + 2]);
+    }
+
+  int out_index = yy * opitch + xx * N_CHANNELS;
+  output_buffer[out_index] = min_red;
+  output_buffer[out_index + 1] = min_green;
+  output_buffer[out_index + 2] = min_blue;
 }
 
 __global__ void morphological_dilation(std::byte* buffer,
                                        size_t bpitch,
                                        std::byte* output_buffer,
                                        size_t opitch,
-                                       frame_info* buffer_info)
+                                       const frame_info* buffer_info)
 {
   int width = buffer_info->width;
   int height = buffer_info->height;
 
   int yy = blockIdx.y * blockDim.y + threadIdx.y;
-  int xx = (blockIdx.x * blockDim.x + threadIdx.x);
+  int xx = blockIdx.x * blockDim.x + threadIdx.x;
 
   if (xx >= width || yy >= height)
     return;
@@ -395,66 +384,55 @@ __global__ void morphological_dilation(std::byte* buffer,
   std::byte max_green = std::byte(0);
   std::byte max_blue = std::byte(0);
 
-  if (yy >= 3)
+  // Compute the maximum value in the 5x5 neighborhood
+  for (int j = yy - 2; j <= yy + 2; j++)
     {
-      max_red = buffer[(yy - 3) * bpitch + xx * N_CHANNELS];
-      max_green = buffer[(yy - 3) * bpitch + xx * N_CHANNELS + 1];
-      max_blue = buffer[(yy - 3) * bpitch + xx * N_CHANNELS + 2];
-    }
-  for (int i = yy - 2; i < yy; ++i)
-    {
-      if (i >= 0)
+      for (int i = xx - 2; i <= xx + 2; i++)
         {
-          for (int j = xx - 2; j <= xx + 2; j++)
+          if (i >= 0 && i < width && j >= 0 && j < height)
             {
-              if (j >= 0 && j < width)
-                {
-                  max_red = max(max_red, buffer[i * bpitch + j * N_CHANNELS]);
-                  max_green =
-                    max(max_green, buffer[i * bpitch + j * N_CHANNELS + 1]);
-                  max_blue =
-                    max(max_blue, buffer[i * bpitch + j * N_CHANNELS + 2]);
-                }
+              max_red = max(max_red, buffer[j * bpitch + i * N_CHANNELS]);
+              max_green =
+                max(max_green, buffer[j * bpitch + i * N_CHANNELS + 1]);
+              max_blue = max(max_blue, buffer[j * bpitch + i * N_CHANNELS + 2]);
             }
         }
-    }
-  for (int j = xx - 3; j <= xx + 3; j++)
-    {
-      if (j >= 0 && j < width)
-        {
-          max_red = max(max_red, buffer[yy * bpitch + j * N_CHANNELS]);
-          max_green = max(max_green, buffer[yy * bpitch + j * N_CHANNELS + 1]);
-          max_blue = max(max_blue, buffer[yy * bpitch + j * N_CHANNELS + 2]);
-        }
-    }
-  for (int i = yy + 1; i <= yy + 2; ++i)
-    {
-      if (i < width)
-        {
-          for (int j = xx - 2; j <= xx + 2; j++)
-            {
-              if (j >= 0 && j < width)
-                {
-                  max_red = max(max_red, buffer[i * bpitch + j * N_CHANNELS]);
-                  max_green =
-                    max(max_green, buffer[i * bpitch + j * N_CHANNELS + 1]);
-                  max_blue =
-                    max(max_blue, buffer[i * bpitch + j * N_CHANNELS + 2]);
-                }
-            }
-        }
-    }
-  if (yy + 3 < width)
-    {
-      max_red = max(max_red, buffer[(yy - 3) * bpitch + xx * N_CHANNELS]);
-      max_green =
-        max(max_green, buffer[(yy - 3) * bpitch + xx * N_CHANNELS + 1]);
-      max_blue = max(max_blue, buffer[(yy - 3) * bpitch + xx * N_CHANNELS + 2]);
     }
 
-  output_buffer[yy * opitch + xx * N_CHANNELS] = max_red;
-  output_buffer[yy * opitch + xx * N_CHANNELS + 1] = max_green;
-  output_buffer[yy * opitch + xx * N_CHANNELS + 2] = max_blue;
+  // Compute the maximum value in the extremities
+  if (xx - 3 >= 0)
+    {
+      int i = xx - 3;
+      max_red = max(max_red, buffer[yy * bpitch + i * N_CHANNELS]);
+      max_green = max(max_green, buffer[yy * bpitch + i * N_CHANNELS + 1]);
+      max_blue = max(max_blue, buffer[yy * bpitch + i * N_CHANNELS + 2]);
+    }
+  if (xx + 3 < width)
+    {
+      int i = xx + 3;
+      max_red = max(max_red, buffer[yy * bpitch + i * N_CHANNELS]);
+      max_green = max(max_green, buffer[yy * bpitch + i * N_CHANNELS + 1]);
+      max_blue = max(max_blue, buffer[yy * bpitch + i * N_CHANNELS + 2]);
+    }
+  if (yy - 3 >= 0)
+    {
+      int j = yy - 3;
+      max_red = max(max_red, buffer[j * bpitch + xx * N_CHANNELS]);
+      max_green = max(max_green, buffer[j * bpitch + xx * N_CHANNELS + 1]);
+      max_blue = max(max_blue, buffer[j * bpitch + xx * N_CHANNELS + 2]);
+    }
+  if (yy + 3 < height)
+    {
+      int j = yy + 3;
+      max_red = max(max_red, buffer[j * bpitch + xx * N_CHANNELS]);
+      max_green = max(max_green, buffer[j * bpitch + xx * N_CHANNELS + 1]);
+      max_blue = max(max_blue, buffer[j * bpitch + xx * N_CHANNELS + 2]);
+    }
+
+  int out_index = yy * opitch + xx * N_CHANNELS;
+  output_buffer[out_index] = max_red;
+  output_buffer[out_index + 1] = max_green;
+  output_buffer[out_index + 2] = max_blue;
 }
 
 //******************************************************
@@ -676,7 +654,7 @@ namespace
 
   void opening_impl_inplace(std::byte* buffer,
                             size_t bpitch,
-                            frame_info* buffer_info)
+                            const frame_info* buffer_info)
   {
     int width = buffer_info->width;
     int height = buffer_info->height;
@@ -716,6 +694,9 @@ namespace
     err = cudaMemcpy2D(buffer, bpitch, gpu_image, gpu_pitch, width * N_CHANNELS,
                        height, cudaMemcpyHostToDevice);
     CHECK_CUDA_ERROR(err);
+
+    cudaFree(gpu_image);
+    cudaFree(gpu_intermediate_image);
   }
 
   //******************************************************
