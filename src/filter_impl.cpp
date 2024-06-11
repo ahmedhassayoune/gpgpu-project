@@ -7,11 +7,6 @@
 #include <math.h>
 #include "logo.h"
 
-struct LAB
-{
-  float l, a, b;
-};
-
 struct pos
 {
   int x, y;

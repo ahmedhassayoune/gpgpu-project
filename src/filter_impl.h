@@ -16,6 +16,11 @@ extern "C"
     uint8_t r, g, b;
   };
 
+  struct LAB
+  {
+    float l, a, b;
+  };
+
   constexpr size_t N_CHANNELS = sizeof(rgb);
 
   struct frame_info
