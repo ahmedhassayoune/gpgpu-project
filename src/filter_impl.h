@@ -21,7 +21,9 @@ extern "C"
     float l, a, b;
   };
 
+#ifdef __cplusplus
   constexpr size_t N_CHANNELS = sizeof(rgb);
+#endif
 
   struct frame_info
   {
