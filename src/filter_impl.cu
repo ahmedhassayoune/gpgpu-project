@@ -292,6 +292,151 @@ __global__ void normalizeAndConvertTo8bitKernel(std::byte* buffer,
 
 //******************************************************
 //**                                                  **
+//**             Morphological Opening                **
+//**                                                  **
+//******************************************************
+
+__global__ void morphological_erosion(std::byte* buffer,
+                                      size_t bpitch,
+                                      std::byte* output_buffer,
+                                      size_t opitch,
+                                      const frame_info* buffer_info)
+{
+  int width = buffer_info->width;
+  int height = buffer_info->height;
+
+  int yy = blockIdx.y * blockDim.y + threadIdx.y;
+  int xx = blockIdx.x * blockDim.x + threadIdx.x;
+
+  if (xx >= width || yy >= height)
+    return;
+  std::byte min_red = std::byte(0xff);
+  std::byte min_green = std::byte(0xff);
+  std::byte min_blue = std::byte(0xff);
+
+  // Compute the minimum value in the 5x5 neighborhood
+  for (int j = yy - 2; j <= yy + 2; j++)
+    {
+      for (int i = xx - 2; i <= xx + 2; i++)
+        {
+          if (i >= 0 && i < width && j >= 0 && j < height)
+            {
+              min_red = min(min_red, buffer[j * bpitch + i * N_CHANNELS]);
+              min_green =
+                min(min_green, buffer[j * bpitch + i * N_CHANNELS + 1]);
+              min_blue = min(min_blue, buffer[j * bpitch + i * N_CHANNELS + 2]);
+            }
+        }
+    }
+
+  // Compute the minimum value in the extremities
+  if (xx - 3 >= 0)
+    {
+      int i = xx - 3;
+      min_red = min(min_red, buffer[yy * bpitch + i * N_CHANNELS]);
+      min_green = min(min_green, buffer[yy * bpitch + i * N_CHANNELS + 1]);
+      min_blue = min(min_blue, buffer[yy * bpitch + i * N_CHANNELS + 2]);
+    }
+  if (xx + 3 < width)
+    {
+      int i = xx + 3;
+      min_red = min(min_red, buffer[yy * bpitch + i * N_CHANNELS]);
+      min_green = min(min_green, buffer[yy * bpitch + i * N_CHANNELS + 1]);
+      min_blue = min(min_blue, buffer[yy * bpitch + i * N_CHANNELS + 2]);
+    }
+  if (yy - 3 >= 0)
+    {
+      int j = yy - 3;
+      min_red = min(min_red, buffer[j * bpitch + xx * N_CHANNELS]);
+      min_green = min(min_green, buffer[j * bpitch + xx * N_CHANNELS + 1]);
+      min_blue = min(min_blue, buffer[j * bpitch + xx * N_CHANNELS + 2]);
+    }
+  if (yy + 3 < height)
+    {
+      int j = yy + 3;
+      min_red = min(min_red, buffer[j * bpitch + xx * N_CHANNELS]);
+      min_green = min(min_green, buffer[j * bpitch + xx * N_CHANNELS + 1]);
+      min_blue = min(min_blue, buffer[j * bpitch + xx * N_CHANNELS + 2]);
+    }
+
+  int out_index = yy * opitch + xx * N_CHANNELS;
+  output_buffer[out_index] = min_red;
+  output_buffer[out_index + 1] = min_green;
+  output_buffer[out_index + 2] = min_blue;
+}
+
+__global__ void morphological_dilation(std::byte* buffer,
+                                       size_t bpitch,
+                                       std::byte* output_buffer,
+                                       size_t opitch,
+                                       const frame_info* buffer_info)
+{
+  int width = buffer_info->width;
+  int height = buffer_info->height;
+
+  int yy = blockIdx.y * blockDim.y + threadIdx.y;
+  int xx = blockIdx.x * blockDim.x + threadIdx.x;
+
+  if (xx >= width || yy >= height)
+    return;
+
+  std::byte max_red = std::byte(0);
+  std::byte max_green = std::byte(0);
+  std::byte max_blue = std::byte(0);
+
+  // Compute the maximum value in the 5x5 neighborhood
+  for (int j = yy - 2; j <= yy + 2; j++)
+    {
+      for (int i = xx - 2; i <= xx + 2; i++)
+        {
+          if (i >= 0 && i < width && j >= 0 && j < height)
+            {
+              max_red = max(max_red, buffer[j * bpitch + i * N_CHANNELS]);
+              max_green =
+                max(max_green, buffer[j * bpitch + i * N_CHANNELS + 1]);
+              max_blue = max(max_blue, buffer[j * bpitch + i * N_CHANNELS + 2]);
+            }
+        }
+    }
+
+  // Compute the maximum value in the extremities
+  if (xx - 3 >= 0)
+    {
+      int i = xx - 3;
+      max_red = max(max_red, buffer[yy * bpitch + i * N_CHANNELS]);
+      max_green = max(max_green, buffer[yy * bpitch + i * N_CHANNELS + 1]);
+      max_blue = max(max_blue, buffer[yy * bpitch + i * N_CHANNELS + 2]);
+    }
+  if (xx + 3 < width)
+    {
+      int i = xx + 3;
+      max_red = max(max_red, buffer[yy * bpitch + i * N_CHANNELS]);
+      max_green = max(max_green, buffer[yy * bpitch + i * N_CHANNELS + 1]);
+      max_blue = max(max_blue, buffer[yy * bpitch + i * N_CHANNELS + 2]);
+    }
+  if (yy - 3 >= 0)
+    {
+      int j = yy - 3;
+      max_red = max(max_red, buffer[j * bpitch + xx * N_CHANNELS]);
+      max_green = max(max_green, buffer[j * bpitch + xx * N_CHANNELS + 1]);
+      max_blue = max(max_blue, buffer[j * bpitch + xx * N_CHANNELS + 2]);
+    }
+  if (yy + 3 < height)
+    {
+      int j = yy + 3;
+      max_red = max(max_red, buffer[j * bpitch + xx * N_CHANNELS]);
+      max_green = max(max_green, buffer[j * bpitch + xx * N_CHANNELS + 1]);
+      max_blue = max(max_blue, buffer[j * bpitch + xx * N_CHANNELS + 2]);
+    }
+
+  int out_index = yy * opitch + xx * N_CHANNELS;
+  output_buffer[out_index] = max_red;
+  output_buffer[out_index + 1] = max_green;
+  output_buffer[out_index + 2] = max_blue;
+}
+
+//******************************************************
+//**                                                  **
 //**               Hysteresis Threshold               **
 //**                                                  **
 //******************************************************
@@ -499,6 +644,59 @@ namespace
 
     err = cudaFree(distanceArray);
     CHECK_CUDA_ERROR(err);
+  }
+
+  //******************************************************
+  //**                                                  **
+  //**             Morphological Opening                **
+  //**                                                  **
+  //******************************************************
+
+  void opening_impl_inplace(std::byte* buffer,
+                            size_t bpitch,
+                            const frame_info* buffer_info)
+  {
+    int width = buffer_info->width;
+    int height = buffer_info->height;
+
+    std::byte* gpu_image;
+    size_t gpu_pitch;
+    cudaError_t err =
+      cudaMallocPitch(&gpu_image, &gpu_pitch, width * N_CHANNELS, height);
+    CHECK_CUDA_ERROR(err);
+
+    err = cudaMemcpy2D(gpu_image, gpu_pitch, buffer, bpitch, width * N_CHANNELS,
+                       height, cudaMemcpyDeviceToHost);
+    CHECK_CUDA_ERROR(err);
+
+    std::byte* gpu_intermediate_image;
+    size_t gpu_intermediate_pitch;
+    err = cudaMallocPitch(&gpu_intermediate_image, &gpu_intermediate_pitch,
+                          width * N_CHANNELS, height);
+    CHECK_CUDA_ERROR(err);
+
+    dim3 blockSize(16, 16);
+    dim3 gridSize((width + (blockSize.x - 1)) / blockSize.x,
+                  (height + (blockSize.y - 1)) / blockSize.y);
+
+    morphological_erosion<<<gridSize, blockSize>>>(
+      gpu_image, gpu_pitch, gpu_intermediate_image, gpu_intermediate_pitch,
+      buffer_info);
+    err = cudaDeviceSynchronize();
+    CHECK_CUDA_ERROR(err);
+
+    morphological_dilation<<<gridSize, blockSize>>>(
+      gpu_intermediate_image, gpu_intermediate_pitch, gpu_image, gpu_pitch,
+      buffer_info);
+    err = cudaDeviceSynchronize();
+    CHECK_CUDA_ERROR(err);
+
+    err = cudaMemcpy2D(buffer, bpitch, gpu_image, gpu_pitch, width * N_CHANNELS,
+                       height, cudaMemcpyHostToDevice);
+    CHECK_CUDA_ERROR(err);
+
+    cudaFree(gpu_image);
+    cudaFree(gpu_intermediate_image);
   }
 
   //******************************************************
