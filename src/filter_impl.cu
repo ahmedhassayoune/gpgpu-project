@@ -26,7 +26,7 @@ void check(T err,
 template <typename T>
 __device__ inline T* eltPtr(T* baseAddress, int col, int row, size_t pitch)
 {
-  return (T*)((char*)baseAddress + row * pitch + col * sizeof(T)); // FIXME
+  return (T*)((char*)baseAddress + row * pitch + col * sizeof(T));
 }
 
 __device__ bool hysteresis_has_changed;
@@ -193,8 +193,6 @@ __global__ void rgbToLabDistanceKernel(std::byte* referenceBuffer,
                                        size_t rpitch,
                                        std::byte* buffer,
                                        size_t bpitch,
-                                       float* distanceArray,
-                                       size_t dpitch,
                                        const int width,
                                        const int height)
 {
@@ -234,31 +232,10 @@ __global__ void rgbToLabDistanceKernel(std::byte* referenceBuffer,
          + powf((lab1).b - (lab2).b, 2)))
   float distance = LAB_DISTANCE(currentLab, referenceLab);
 #undef LAB_DISTANCE
-  float* distancePtr = (float*)((char*)distanceArray + y * dpitch);
-  distancePtr[x] = distance;
-}
-
-__global__ void normalizeAndConvertTo8bitKernel(std::byte* buffer,
-                                                size_t bpitch,
-                                                float* distanceArray,
-                                                size_t dpitch,
-                                                float max_distance,
-                                                const int width,
-                                                const int height)
-{
-  int x = blockIdx.x * blockDim.x + threadIdx.x;
-  int y = blockIdx.y * blockDim.y + threadIdx.y;
-
-  if (x >= width || y >= height)
-    return;
-
-  float* distancePtr = (float*)((char*)distanceArray + y * dpitch);
-  float distance = distancePtr[x];
 
   uint8_t distance8bit =
-    static_cast<uint8_t>(fminf(distance / max_distance * 255.0f, 255.0f));
+    static_cast<uint8_t>(fminf(distance / MAX_LAB_DISTANCE * 255.0f, 255.0f));
 
-  rgb* lineptr = (rgb*)(buffer + y * bpitch);
   lineptr[x].r = distance8bit;
   lineptr[x].g = distance8bit;
   lineptr[x].b = distance8bit;
@@ -618,42 +595,17 @@ namespace
     int height = buffer_info->height;
 
     cudaError_t err;
-    float* distanceArray;
     size_t dpitch;
-
-    err =
-      cudaMallocPitch(&distanceArray, &dpitch, width * sizeof(float), height);
-    CHECK_CUDA_ERROR(err);
 
     dim3 blockSize(BLOCK_SIZE, BLOCK_SIZE);
     dim3 gridSize((width + blockSize.x - 1) / blockSize.x,
                   (height + blockSize.y - 1) / blockSize.y);
 
     rgbToLabDistanceKernel<<<gridSize, blockSize>>>(
-      referenceBuffer, rpitch, buffer, bpitch, distanceArray, dpitch, width,
+      referenceBuffer, rpitch, buffer, bpitch, width,
       height);
+
     err = cudaDeviceSynchronize();
-    CHECK_CUDA_ERROR(err);
-
-    float* h_distanceArray = new float[width * height];
-    err = cudaMemcpy2D(h_distanceArray, width * sizeof(float), distanceArray,
-                       dpitch, width * sizeof(float), height,
-                       cudaMemcpyDeviceToHost);
-    CHECK_CUDA_ERROR(err);
-
-    float maxDistance = 0.0f;
-    for (int i = 0; i < width * height; ++i)
-      {
-        maxDistance = fmaxf(maxDistance, h_distanceArray[i]);
-      }
-    delete[] h_distanceArray;
-
-    normalizeAndConvertTo8bitKernel<<<gridSize, blockSize>>>(
-      buffer, bpitch, distanceArray, dpitch, maxDistance, width, height);
-    err = cudaDeviceSynchronize();
-    CHECK_CUDA_ERROR(err);
-
-    err = cudaFree(distanceArray);
     CHECK_CUDA_ERROR(err);
   }
 
