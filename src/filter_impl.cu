@@ -587,7 +587,6 @@ namespace
     int height = buffer_info->height;
 
     cudaError_t err;
-    size_t dpitch;
 
     dim3 blockSize(BLOCK_SIZE, BLOCK_SIZE);
     dim3 gridSize((width + blockSize.x - 1) / blockSize.x,
