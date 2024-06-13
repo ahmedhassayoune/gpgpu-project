@@ -5,6 +5,8 @@
 #include <cstdio>
 #include <thread>
 
+#define BLOCK_SIZE 16
+
 #define CHECK_CUDA_ERROR(val) check((val), #val, __FILE__, __LINE__)
 template <typename T>
 void check(T err,
@@ -19,6 +21,11 @@ void check(T err,
       // We don't exit when we encounter CUDA errors in this example.
       std::exit(EXIT_FAILURE);
     }
+}
+
+template <typename T>
+__device__ inline T* eltPtr(T *baseAddress, int col, int row, size_t pitch) {
+  return (T*)((char*)baseAddress + row * pitch + col * sizeof(T));  // FIXME
 }
 
 __device__ bool hysteresis_has_changed;
@@ -225,8 +232,7 @@ __global__ void rgbToLabDistanceKernel(std::byte* referenceBuffer,
          + powf((lab1).b - (lab2).b, 2)))
   float distance = LAB_DISTANCE(currentLab, referenceLab);
 #undef LAB_DISTANCE
-  float* distancePtr = reinterpret_cast<float*>(
-    reinterpret_cast<std::byte*>(distanceArray) + y * dpitch);
+  float* distancePtr = (float*)((char*)distanceArray + y * dpitch);
   distancePtr[x] = distance;
 }
 
@@ -246,15 +252,13 @@ __global__ void normalizeAndConvertTo8bitKernel(std::byte* buffer,
   if (x >= width || y >= height)
     return;
 
-  rgb* lineptr = (rgb*)(buffer + y * bpitch);
-
-  float* distancePtr = reinterpret_cast<float*>(
-    reinterpret_cast<std::byte*>(distanceArray) + y * dpitch);
+  float* distancePtr = (float*)((char*)distanceArray + y * dpitch);
   float distance = distancePtr[x];
 
   uint8_t distance8bit =
     static_cast<uint8_t>(fminf(distance / max_distance * 255.0f, 255.0f));
 
+  rgb* lineptr = (rgb*)(buffer + y * bpitch);
   lineptr[x].r = distance8bit;
   lineptr[x].g = distance8bit;
   lineptr[x].b = distance8bit;
@@ -329,7 +333,7 @@ __global__ void morphological_erosion(std::byte* buffer,
       min_blue = min(min_blue, (unsigned int)buffer[j * bpitch + xx * N_CHANNELS + 2]);
     }
 
-  int out_index = yy * opitch + xx * N_CHANNELS;
+  size_t out_index = yy * opitch + xx * N_CHANNELS;
   output_buffer[out_index] = (std::byte)min_red;
   output_buffer[out_index + 1] = (std::byte)min_green;
   output_buffer[out_index + 2] = (std::byte)min_blue;
@@ -599,7 +603,7 @@ namespace
       cudaMallocPitch(&distanceArray, &dpitch, width * sizeof(float), height);
     CHECK_CUDA_ERROR(err);
 
-    dim3 blockSize(16, 16);
+    dim3 blockSize(BLOCK_SIZE, BLOCK_SIZE);
     dim3 gridSize((width + blockSize.x - 1) / blockSize.x,
                   (height + blockSize.y - 1) / blockSize.y);
 
@@ -660,7 +664,7 @@ namespace
                           width * N_CHANNELS, height);
     CHECK_CUDA_ERROR(err);
 
-    dim3 blockSize(16, 16);
+    dim3 blockSize(BLOCK_SIZE, BLOCK_SIZE);
     dim3 gridSize((width + (blockSize.x - 1)) / blockSize.x,
                   (height + (blockSize.y - 1)) / blockSize.y);
 
@@ -732,7 +736,7 @@ namespace
     err = cudaMemset2D(out_buffer, opitch, 0, width * N_CHANNELS, height);
     CHECK_CUDA_ERROR(err);
 
-    dim3 blockSize(16, 16);
+    dim3 blockSize(BLOCK_SIZE, BLOCK_SIZE);
     dim3 gridSize((width + (blockSize.x - 1)) / blockSize.x,
                   (height + (blockSize.y - 1)) / blockSize.y);
     apply_threshold_on_marker<<<gridSize, blockSize>>>(
@@ -811,7 +815,7 @@ namespace
     }
     else {
       // Copy dbuffer where mask is false and fallback_dbuffer where mask is true
-      dim3 blockSize(16, 16);
+      dim3 blockSize(BLOCK_SIZE, BLOCK_SIZE);
       dim3 gridSize((width + blockSize.x - 1) / blockSize.x,
                     (height + blockSize.y - 1) / blockSize.y);
       copy_buffer_kernel<<<gridSize, blockSize>>>(
@@ -907,7 +911,7 @@ namespace
         CHECK_CUDA_ERROR(err);
       }
   
-    dim3 blockSize(16, 16);
+    dim3 blockSize(BLOCK_SIZE, BLOCK_SIZE);
     dim3 gridSize((width + (blockSize.x - 1)) / blockSize.x,
                   (height + (blockSize.y - 1)) / blockSize.y);
 
@@ -954,7 +958,7 @@ extern "C"
     CHECK_CUDA_ERROR(err);
 
     // Set thread block and grid dimensions
-    dim3 blockSize(16, 16);
+    dim3 blockSize(BLOCK_SIZE, BLOCK_SIZE);
     dim3 gridSize((width + blockSize.x - 1) / blockSize.x,
                   (height + blockSize.y - 1) / blockSize.y);
 
