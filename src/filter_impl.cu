@@ -23,12 +23,6 @@ void check(T err,
     }
 }
 
-template <typename T>
-__device__ inline T* eltPtr(T* baseAddress, int col, int row, size_t pitch)
-{
-  return (T*)((char*)baseAddress + row * pitch + col * sizeof(T));
-}
-
 __device__ bool hysteresis_has_changed;
 
 //******************************************************
@@ -51,21 +45,19 @@ __global__ void estimate_background_mean(_BE_FSIGN)
   if (xx >= width || yy >= height)
     return;
 
-  constexpr size_t PIXEL_STRIDE = N_CHANNELS;
-
 #ifdef _BACKGROUND_ESTIMATION_MEAN_SPST
   // compute sum per channel
   int sums[N_CHANNELS] = {0};
   std::byte* ptr;
   for (int ii = 0; ii < buffers_amount; ++ii)
     {
-      ptr = buffers[ii] + yy * bpitches[ii] + xx * PIXEL_STRIDE;
+      ptr = buffers[ii] + yy * bpitches[ii] + xx * N_CHANNELS;
       for (int jj = 0; jj < N_CHANNELS; ++jj)
         sums[jj] += (int)ptr[jj];
     }
 
   // compute mean per channel
-  ptr = out + yy * opitch + xx * PIXEL_STRIDE;
+  ptr = out + yy * opitch + xx * N_CHANNELS;
   for (int ii = 0; ii < N_CHANNELS; ++ii)
     ptr[ii] = (std::byte)(sums[ii] / buffers_amount);
 #else
