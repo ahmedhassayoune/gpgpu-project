@@ -277,46 +277,46 @@ __global__ void morphological_erosion(std::byte* buffer,
   // Compute the minimum value in the extremities
   if (xx - 3 >= 0)
     {
-      int i = xx - 3;
+      int i = yy * bpitch + (xx - 3) * N_CHANNELS;
       min_red =
-        min(min_red, (unsigned int)buffer[yy * bpitch + i * N_CHANNELS]);
+        min(min_red, (unsigned int)buffer[i]);
       min_green =
-        min(min_green, (unsigned int)buffer[yy * bpitch + i * N_CHANNELS + 1]);
+        min(min_green, (unsigned int)buffer[i + 1]);
       min_blue =
-        min(min_blue, (unsigned int)buffer[yy * bpitch + i * N_CHANNELS + 2]);
+        min(min_blue, (unsigned int)buffer[i + 2]);
     }
   if (xx + 3 < width)
     {
-      int i = xx + 3;
+      int i = yy * bpitch + (xx + 3) * N_CHANNELS;
       min_red =
-        min(min_red, (unsigned int)buffer[yy * bpitch + i * N_CHANNELS]);
+        min(min_red, (unsigned int)buffer[i]);
       min_green =
-        min(min_green, (unsigned int)buffer[yy * bpitch + i * N_CHANNELS + 1]);
+        min(min_green, (unsigned int)buffer[i + 1]);
       min_blue =
-        min(min_blue, (unsigned int)buffer[yy * bpitch + i * N_CHANNELS + 2]);
+        min(min_blue, (unsigned int)buffer[i + 2]);
     }
   if (yy - 3 >= 0)
     {
-      int j = yy - 3;
+      int i = (yy - 3) * bpitch + xx * N_CHANNELS;
       min_red =
-        min(min_red, (unsigned int)buffer[j * bpitch + xx * N_CHANNELS]);
+        min(min_red, (unsigned int)buffer[i]);
       min_green =
-        min(min_green, (unsigned int)buffer[j * bpitch + xx * N_CHANNELS + 1]);
+        min(min_green, (unsigned int)buffer[i + 1]);
       min_blue =
-        min(min_blue, (unsigned int)buffer[j * bpitch + xx * N_CHANNELS + 2]);
+        min(min_blue, (unsigned int)buffer[i + 2]);
     }
   if (yy + 3 < height)
     {
-      int j = yy + 3;
+      int i = (yy + 3) * bpitch + xx * N_CHANNELS;
       min_red =
-        min(min_red, (unsigned int)buffer[j * bpitch + xx * N_CHANNELS]);
+        min(min_red, (unsigned int)buffer[i]);
       min_green =
-        min(min_green, (unsigned int)buffer[j * bpitch + xx * N_CHANNELS + 1]);
+        min(min_green, (unsigned int)buffer[i + 1]);
       min_blue =
-        min(min_blue, (unsigned int)buffer[j * bpitch + xx * N_CHANNELS + 2]);
+        min(min_blue, (unsigned int)buffer[i + 2]);
     }
 
-  size_t out_index = yy * opitch + xx * N_CHANNELS;
+  int out_index = yy * opitch + xx * N_CHANNELS;
   output_buffer[out_index] = (std::byte)min_red;
   output_buffer[out_index + 1] = (std::byte)min_green;
   output_buffer[out_index + 2] = (std::byte)min_blue;
@@ -361,43 +361,43 @@ __global__ void morphological_dilation(std::byte* buffer,
   // Compute the maximum value in the extremities
   if (xx - 3 >= 0)
     {
-      int i = xx - 3;
+      int i = yy * bpitch + (xx - 3) * N_CHANNELS;
       max_red =
-        max(max_red, (unsigned int)buffer[yy * bpitch + i * N_CHANNELS]);
+        max(max_red, (unsigned int)buffer[i]);
       max_green =
-        max(max_green, (unsigned int)buffer[yy * bpitch + i * N_CHANNELS + 1]);
+        max(max_green, (unsigned int)buffer[i + 1]);
       max_blue =
-        max(max_blue, (unsigned int)buffer[yy * bpitch + i * N_CHANNELS + 2]);
+        max(max_blue, (unsigned int)buffer[i + 2]);
     }
   if (xx + 3 < width)
     {
-      int i = xx + 3;
+      int i = yy * bpitch + (xx + 3) * N_CHANNELS;
       max_red =
-        max(max_red, (unsigned int)buffer[yy * bpitch + i * N_CHANNELS]);
+        max(max_red, (unsigned int)buffer[i]);
       max_green =
-        max(max_green, (unsigned int)buffer[yy * bpitch + i * N_CHANNELS + 1]);
+        max(max_green, (unsigned int)buffer[i + 1]);
       max_blue =
-        max(max_blue, (unsigned int)buffer[yy * bpitch + i * N_CHANNELS + 2]);
+        max(max_blue, (unsigned int)buffer[i + 2]);
     }
   if (yy - 3 >= 0)
     {
-      int j = yy - 3;
+      int i = (yy - 3) * bpitch + xx * N_CHANNELS;
       max_red =
-        max(max_red, (unsigned int)buffer[j * bpitch + xx * N_CHANNELS]);
+        max(max_red, (unsigned int)buffer[i]);
       max_green =
-        max(max_green, (unsigned int)buffer[j * bpitch + xx * N_CHANNELS + 1]);
+        max(max_green, (unsigned int)buffer[i + 1]);
       max_blue =
-        max(max_blue, (unsigned int)buffer[j * bpitch + xx * N_CHANNELS + 2]);
+        max(max_blue, (unsigned int)buffer[i + 2]);
     }
   if (yy + 3 < height)
     {
-      int j = yy + 3;
+      int i = (yy + 3) * bpitch + xx * N_CHANNELS;
       max_red =
-        max(max_red, (unsigned int)buffer[j * bpitch + xx * N_CHANNELS]);
+        max(max_red, (unsigned int)buffer[i]);
       max_green =
-        max(max_green, (unsigned int)buffer[j * bpitch + xx * N_CHANNELS + 1]);
+        max(max_green, (unsigned int)buffer[i + 1]);
       max_blue =
-        max(max_blue, (unsigned int)buffer[j * bpitch + xx * N_CHANNELS + 2]);
+        max(max_blue, (unsigned int)buffer[i + 2]);
     }
 
   int out_index = yy * opitch + xx * N_CHANNELS;
