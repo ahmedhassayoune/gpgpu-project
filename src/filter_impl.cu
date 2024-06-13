@@ -191,11 +191,8 @@ __global__ void rgbToLabDistanceKernel(std::byte* referenceBuffer,
                                        size_t bpitch,
                                        float* distanceArray,
                                        size_t dpitch,
-                                       const frame_info* buffer_info)
+                                       const int width, const int height)
 {
-  int width = buffer_info->width;
-  int height = buffer_info->height;
-
   int x = blockIdx.x * blockDim.x + threadIdx.x;
   int y = blockIdx.y * blockDim.y + threadIdx.y;
 
@@ -241,11 +238,8 @@ __global__ void normalizeAndConvertTo8bitKernel(std::byte* buffer,
                                                 float* distanceArray,
                                                 size_t dpitch,
                                                 float max_distance,
-                                                const frame_info* buffer_info)
+                                                const int width, const int height)
 {
-  int width = buffer_info->width;
-  int height = buffer_info->height;
-
   int x = blockIdx.x * blockDim.x + threadIdx.x;
   int y = blockIdx.y * blockDim.y + threadIdx.y;
 
@@ -274,11 +268,8 @@ __global__ void morphological_erosion(std::byte* buffer,
                                       size_t bpitch,
                                       std::byte* output_buffer,
                                       size_t opitch,
-                                      const frame_info* buffer_info)
+                                      const int width, const int height)
 {
-  int width = buffer_info->width;
-  int height = buffer_info->height;
-
   int yy = blockIdx.y * blockDim.y + threadIdx.y;
   int xx = blockIdx.x * blockDim.x + threadIdx.x;
 
@@ -343,11 +334,8 @@ __global__ void morphological_dilation(std::byte* buffer,
                                        size_t bpitch,
                                        std::byte* output_buffer,
                                        size_t opitch,
-                                       const frame_info* buffer_info)
+                                       const int width, const int height)
 {
-  int width = buffer_info->width;
-  int height = buffer_info->height;
-
   int yy = blockIdx.y * blockDim.y + threadIdx.y;
   int xx = blockIdx.x * blockDim.x + threadIdx.x;
 
@@ -428,12 +416,9 @@ __global__ void apply_threshold_on_marker(std::byte* buffer,
                                           size_t bpitch,
                                           bool* marker,
                                           size_t mpitch,
-                                          const frame_info* buffer_info,
+                                          const int width, const int height,
                                           int high_threshold)
 {
-  int width = buffer_info->width;
-  int height = buffer_info->height;
-
   int y = blockIdx.y * blockDim.y + threadIdx.y;
   int x = blockIdx.x * blockDim.x + threadIdx.x;
 
@@ -462,12 +447,9 @@ __global__ void reconstruct_image(std::byte* buffer,
                                   size_t opitch,
                                   bool* marker,
                                   size_t mpitch,
-                                  const frame_info* buffer_info,
+                                  const int width, const int height,
                                   int low_threshold)
 {
-  int width = buffer_info->width;
-  int height = buffer_info->height;
-
   int y = blockIdx.y * blockDim.y + threadIdx.y;
   int x = blockIdx.x * blockDim.x + threadIdx.x;
 
@@ -548,11 +530,8 @@ __global__ void copy_buffer_kernel(std::byte* dbuffer,
                               size_t mpitch,
                               std::byte* fallback_dbuffer,
                               size_t fpitch,
-                              const frame_info* buffer_info)
+                              const int width, const int height)
 {
-  int width = buffer_info->width;
-  int height = buffer_info->height;
-
   int x = blockIdx.x * blockDim.x + threadIdx.x;
   int y = blockIdx.y * blockDim.y + threadIdx.y;
 
@@ -608,8 +587,7 @@ namespace
                   (height + blockSize.y - 1) / blockSize.y);
 
     rgbToLabDistanceKernel<<<gridSize, blockSize>>>(
-      referenceBuffer, rpitch, buffer, bpitch, distanceArray, dpitch,
-      buffer_info);
+      referenceBuffer, rpitch, buffer, bpitch, distanceArray, dpitch, width, height);
     err = cudaDeviceSynchronize();
     CHECK_CUDA_ERROR(err);
 
@@ -627,7 +605,7 @@ namespace
     delete[] h_distanceArray;
 
     normalizeAndConvertTo8bitKernel<<<gridSize, blockSize>>>(
-      buffer, bpitch, distanceArray, dpitch, maxDistance, buffer_info);
+      buffer, bpitch, distanceArray, dpitch, maxDistance, width, height);
     err = cudaDeviceSynchronize();
     CHECK_CUDA_ERROR(err);
 
@@ -670,13 +648,13 @@ namespace
 
     morphological_erosion<<<gridSize, blockSize>>>(
       gpu_image, gpu_pitch, gpu_intermediate_image, gpu_intermediate_pitch,
-      buffer_info);
+      width, height);
     err = cudaDeviceSynchronize();
     CHECK_CUDA_ERROR(err);
 
     morphological_dilation<<<gridSize, blockSize>>>(
       gpu_intermediate_image, gpu_intermediate_pitch, gpu_image, gpu_pitch,
-      buffer_info);
+      width, height);
     err = cudaDeviceSynchronize();
     CHECK_CUDA_ERROR(err);
 
@@ -740,7 +718,7 @@ namespace
     dim3 gridSize((width + (blockSize.x - 1)) / blockSize.x,
                   (height + (blockSize.y - 1)) / blockSize.y);
     apply_threshold_on_marker<<<gridSize, blockSize>>>(
-      buffer, bpitch, marker, mpitch, buffer_info, high_threshold);
+      buffer, bpitch, marker, mpitch, width, height, high_threshold);
 
     err = cudaDeviceSynchronize();
     CHECK_CUDA_ERROR(err);
@@ -758,7 +736,7 @@ namespace
 
         reconstruct_image<<<gridSize, blockSize>>>(buffer, bpitch, out_buffer,
                                                    opitch, marker, mpitch,
-                                                   buffer_info, low_threshold);
+                                                   width, height, low_threshold);
 
         err = cudaDeviceSynchronize();
         CHECK_CUDA_ERROR(err);
@@ -820,7 +798,7 @@ namespace
                     (height + blockSize.y - 1) / blockSize.y);
       copy_buffer_kernel<<<gridSize, blockSize>>>(
         dbuffer, bpitch, *cpy_dbuffer, *cpitch, dmask, mpitch, fallback_dbuffer,
-        fpitch, buffer_info);
+        fpitch, width, height);
 
       err = cudaDeviceSynchronize();
       CHECK_CUDA_ERROR(err);
