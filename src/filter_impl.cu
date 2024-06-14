@@ -278,42 +278,30 @@ __global__ void morphological_erosion(std::byte* buffer,
   if (xx - 3 >= 0)
     {
       int i = yy * bpitch + (xx - 3) * N_CHANNELS;
-      min_red =
-        min(min_red, (unsigned int)buffer[i]);
-      min_green =
-        min(min_green, (unsigned int)buffer[i + 1]);
-      min_blue =
-        min(min_blue, (unsigned int)buffer[i + 2]);
+      min_red = min(min_red, (unsigned int)buffer[i]);
+      min_green = min(min_green, (unsigned int)buffer[i + 1]);
+      min_blue = min(min_blue, (unsigned int)buffer[i + 2]);
     }
   if (xx + 3 < width)
     {
       int i = yy * bpitch + (xx + 3) * N_CHANNELS;
-      min_red =
-        min(min_red, (unsigned int)buffer[i]);
-      min_green =
-        min(min_green, (unsigned int)buffer[i + 1]);
-      min_blue =
-        min(min_blue, (unsigned int)buffer[i + 2]);
+      min_red = min(min_red, (unsigned int)buffer[i]);
+      min_green = min(min_green, (unsigned int)buffer[i + 1]);
+      min_blue = min(min_blue, (unsigned int)buffer[i + 2]);
     }
   if (yy - 3 >= 0)
     {
       int i = (yy - 3) * bpitch + xx * N_CHANNELS;
-      min_red =
-        min(min_red, (unsigned int)buffer[i]);
-      min_green =
-        min(min_green, (unsigned int)buffer[i + 1]);
-      min_blue =
-        min(min_blue, (unsigned int)buffer[i + 2]);
+      min_red = min(min_red, (unsigned int)buffer[i]);
+      min_green = min(min_green, (unsigned int)buffer[i + 1]);
+      min_blue = min(min_blue, (unsigned int)buffer[i + 2]);
     }
   if (yy + 3 < height)
     {
       int i = (yy + 3) * bpitch + xx * N_CHANNELS;
-      min_red =
-        min(min_red, (unsigned int)buffer[i]);
-      min_green =
-        min(min_green, (unsigned int)buffer[i + 1]);
-      min_blue =
-        min(min_blue, (unsigned int)buffer[i + 2]);
+      min_red = min(min_red, (unsigned int)buffer[i]);
+      min_green = min(min_green, (unsigned int)buffer[i + 1]);
+      min_blue = min(min_blue, (unsigned int)buffer[i + 2]);
     }
 
   int out_index = yy * opitch + xx * N_CHANNELS;
@@ -362,42 +350,30 @@ __global__ void morphological_dilation(std::byte* buffer,
   if (xx - 3 >= 0)
     {
       int i = yy * bpitch + (xx - 3) * N_CHANNELS;
-      max_red =
-        max(max_red, (unsigned int)buffer[i]);
-      max_green =
-        max(max_green, (unsigned int)buffer[i + 1]);
-      max_blue =
-        max(max_blue, (unsigned int)buffer[i + 2]);
+      max_red = max(max_red, (unsigned int)buffer[i]);
+      max_green = max(max_green, (unsigned int)buffer[i + 1]);
+      max_blue = max(max_blue, (unsigned int)buffer[i + 2]);
     }
   if (xx + 3 < width)
     {
       int i = yy * bpitch + (xx + 3) * N_CHANNELS;
-      max_red =
-        max(max_red, (unsigned int)buffer[i]);
-      max_green =
-        max(max_green, (unsigned int)buffer[i + 1]);
-      max_blue =
-        max(max_blue, (unsigned int)buffer[i + 2]);
+      max_red = max(max_red, (unsigned int)buffer[i]);
+      max_green = max(max_green, (unsigned int)buffer[i + 1]);
+      max_blue = max(max_blue, (unsigned int)buffer[i + 2]);
     }
   if (yy - 3 >= 0)
     {
       int i = (yy - 3) * bpitch + xx * N_CHANNELS;
-      max_red =
-        max(max_red, (unsigned int)buffer[i]);
-      max_green =
-        max(max_green, (unsigned int)buffer[i + 1]);
-      max_blue =
-        max(max_blue, (unsigned int)buffer[i + 2]);
+      max_red = max(max_red, (unsigned int)buffer[i]);
+      max_green = max(max_green, (unsigned int)buffer[i + 1]);
+      max_blue = max(max_blue, (unsigned int)buffer[i + 2]);
     }
   if (yy + 3 < height)
     {
       int i = (yy + 3) * bpitch + xx * N_CHANNELS;
-      max_red =
-        max(max_red, (unsigned int)buffer[i]);
-      max_green =
-        max(max_green, (unsigned int)buffer[i + 1]);
-      max_blue =
-        max(max_blue, (unsigned int)buffer[i + 2]);
+      max_red = max(max_red, (unsigned int)buffer[i]);
+      max_green = max(max_green, (unsigned int)buffer[i + 1]);
+      max_blue = max(max_blue, (unsigned int)buffer[i + 2]);
     }
 
   int out_index = yy * opitch + xx * N_CHANNELS;
@@ -593,8 +569,7 @@ namespace
                   (height + blockSize.y - 1) / blockSize.y);
 
     rgbToLabDistanceKernel<<<gridSize, blockSize>>>(
-      referenceBuffer, rpitch, buffer, bpitch, width,
-      height);
+      referenceBuffer, rpitch, buffer, bpitch, width, height);
 
     err = cudaDeviceSynchronize();
     CHECK_CUDA_ERROR(err);

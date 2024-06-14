@@ -10,7 +10,8 @@ extern "C"
 
 #define BG_SAMPLING_RATE 500 // sampling rate in ms
 #define BG_NUMBER_FRAMES 10  // number of frames to sample
-#define MAX_LAB_DISTANCE 292.0f // maximum distance in LAB space for sRGB pixels [0, 255]
+#define MAX_LAB_DISTANCE                                                       \
+  292.0f // maximum distance in LAB space for sRGB pixels [0, 255]
 
   struct rgb
   {
