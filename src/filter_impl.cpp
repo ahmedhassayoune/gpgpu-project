@@ -324,8 +324,8 @@ static void rgbToXyz(float r, float g, float b, float& x, float& y, float& z)
   b = b / 255.0f;
 
 // Apply sRGB gamma correction
-#define GAMMA_CORRECT(x)                                                       \
-  ((x) > 0.04045f ? powf(((x) + 0.055f) / 1.055f, 2.4f) : (x) / 12.92f)
+#define GAMMA_CORRECT(C)                                                       \
+  ((C) > 0.04045f ? powf(((C) + 0.055f) / 1.055f, 2.4f) : (C) / 12.92f)
   r = GAMMA_CORRECT(r);
   g = GAMMA_CORRECT(g);
   b = GAMMA_CORRECT(b);
@@ -348,12 +348,15 @@ static void xyzToLab(float x, float y, float z, float& l, float& a, float& b)
   y /= D65_Yn;
   z /= D65_Zn;
 
+  const float epsilon = 0.008856f;
+  const float kappa = 903.3f;
+
 // Apply the nonlinear transformation
-#define NONLINEAR(x)                                                           \
-  ((x) > 0.008856f ? powf(x, 1.0f / 3.0f) : (7.787f * x + 16.0f / 116.0f))
+#define NONLINEAR(C)                                                           \
+  ((C) > epsilon ? powf((C), 1.0f / 3.0f) : ((kappa * (C) + 16.0f) / 116.0f))
   float fx = NONLINEAR(x);
-  float fy = NONLINEAR(x);
-  float fz = NONLINEAR(x);
+  float fy = NONLINEAR(y);
+  float fz = NONLINEAR(z);
 #undef NONLINEAR
 
   // Convert to Lab
@@ -371,10 +374,6 @@ void rgb_to_lab(uint8_t* reference_buffer,
   int stride = buffer_info->stride;
   int pixel_stride = buffer_info->pixel_stride;
 
-  float* array_distance = new float[width * height];
-
-  // Step 1 - Fill distance array
-  float max_distance = 0.0f;
   for (int y = 0; y < height; ++y)
     {
       uint8_t* lineptr_reference = reference_buffer + y * stride;
@@ -409,36 +408,20 @@ void rgb_to_lab(uint8_t* reference_buffer,
 
           LAB currentLab = {L_, A_, B_};
 
-// Compute distance between both pixels
+// Compute distance between both LAB pixels
 #define LAB_DISTANCE(lab1, lab2)                                               \
   (sqrtf(powf((lab1).l - (lab2).l, 2) + powf((lab1).a - (lab2).a, 2)           \
          + powf((lab1).b - (lab2).b, 2)))
           float distance = LAB_DISTANCE(currentLab, referenceLab);
 #undef LAB_DISTANCE
-          array_distance[y * width + x] = distance;
-          max_distance = std::max(max_distance, distance);
-        }
-    }
-
-  // Step 2 - Convert Distance array to uint8 buffer
-
-  for (int y = 0; y < height; ++y)
-    {
-      uint8_t* lineptr = buffer + y * stride;
-      for (int x = 0; x < width; ++x)
-        {
-          rgb* pxl = (rgb*)(lineptr + x * pixel_stride);
-          float distance = array_distance[y * width + x];
           uint8_t distance8bit = static_cast<uint8_t>(
-            std::min(distance / max_distance * 255.0f, 255.0f));
+            std::min(distance / MAX_LAB_DISTANCE * 255.0f, 255.0f));
 
-          pxl->r = distance8bit;
-          pxl->g = distance8bit;
-          pxl->b = distance8bit;
+          pxl_->r = distance8bit;
+          pxl_->g = distance8bit;
+          pxl_->b = distance8bit;
         }
     }
-
-  delete[] array_distance;
 }
 
 //******************************************************
