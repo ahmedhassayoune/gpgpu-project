@@ -640,8 +640,8 @@ namespace
   /// @param buffer_info The buffer info
   /// @param low_threshold The low threshold
   /// @param high_threshold The high threshold
-  void apply_hysteresis_threshold(std::byte* buffer,
-                                  size_t bpitch,
+  void apply_hysteresis_threshold(std::byte** buffer,
+                                  size_t* bpitch,
                                   const frame_info* buffer_info,
                                   int low_threshold,
                                   int high_threshold)
@@ -680,7 +680,7 @@ namespace
     dim3 gridSize((width + (blockSize.x - 1)) / blockSize.x,
                   (height + (blockSize.y - 1)) / blockSize.y);
     apply_threshold_on_marker<<<gridSize, blockSize>>>(
-      buffer, bpitch, marker, mpitch, width, height, high_threshold);
+      *buffer, *bpitch, marker, mpitch, width, height, high_threshold);
 
     err = cudaDeviceSynchronize();
     CHECK_CUDA_ERROR(err);
@@ -697,7 +697,7 @@ namespace
         CHECK_CUDA_ERROR(err);
 
         reconstruct_image<<<gridSize, blockSize>>>(
-          buffer, bpitch, out_buffer, opitch, marker, mpitch, width, height,
+          *buffer, *bpitch, out_buffer, opitch, marker, mpitch, width, height,
           low_threshold);
 
         err = cudaDeviceSynchronize();
@@ -710,13 +710,11 @@ namespace
         CHECK_CUDA_ERROR(err);
       }
 
-    // Copy the final image to the buffer
-    err = cudaMemcpy2D(buffer, bpitch, out_buffer, opitch, width * N_CHANNELS,
-                       height, cudaMemcpyDefault);
-    CHECK_CUDA_ERROR(err);
+    cudaFree(*buffer);
+    *buffer = out_buffer;
+    *bpitch = opitch;
 
     cudaFree(marker);
-    cudaFree(out_buffer);
   }
 
   //******************************************************
@@ -930,7 +928,7 @@ extern "C"
     opening_impl_inplace(dmask, mpitch, buffer_info);
 
     // Apply hysteresis thresholding
-    apply_hysteresis_threshold(dmask, mpitch, buffer_info, th_low, th_high);
+    apply_hysteresis_threshold(&dmask, &mpitch, buffer_info, th_low, th_high);
 
     // Apply masking
     apply_masking<<<gridSize, blockSize>>>(dbuffer, bpitch, dmask, mpitch,
