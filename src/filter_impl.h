@@ -27,7 +27,7 @@ extern "C"
 
   struct filter_params
   {
-    char* bg;
+    uint8_t* bg;
     int th_low;
     int th_high;
     int bg_sampling_rate;

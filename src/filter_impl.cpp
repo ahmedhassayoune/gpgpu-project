@@ -80,7 +80,7 @@ extern "C"
                    const filter_params* params)
   {
     // Set first frame as background model
-    static uint8_t* bg_model = buffer;
+    static uint8_t* bg_model = params->bg != nullptr ? params->bg : buffer;
 
     // Copy frame buffer
     uint8_t* cpy_buffer = nullptr;
@@ -99,8 +99,12 @@ extern "C"
     // Apply masking
     apply_masking(buffer, buffer_info, cpy_buffer);
 
-    // Update background model
-    update_bg_model(buffer, &bg_model, cpy_buffer, buffer_info, params, true);
+    // Update background model if user didn't provide one
+    if (params->bg == nullptr)
+      {
+        update_bg_model(buffer, &bg_model, cpy_buffer, buffer_info, params,
+                        true);
+      }
 
     free(cpy_buffer);
   }

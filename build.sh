@@ -32,5 +32,8 @@ ln -sf $SYMLINK_TARGET libgstcudafilter.so            # 4
 # Construct the URI path
 URI_PATH="file://$(pwd)/$URI_FILE"
 
+# Cudafilter params can be set as follows:
+# pipeline... ! cudafilter bg="mybg.ppm" th-low="3" th-high="30" bg-sampling-rate="500" bg-number-frames="10" ! ...pipeline
+
 # Execute the gstreamer pipeline
 gst-launch-1.0 uridecodebin uri=$URI_PATH ! videoconvert ! "video/x-raw, format=(string)RGB" ! cudafilter ! videoconvert ! video/x-raw, format=I420 ! x264enc ! mp4mux ! filesink location=video.mp4 #4

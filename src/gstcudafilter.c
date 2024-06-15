@@ -37,6 +37,10 @@
 #include <gst/gst.h>
 #include <gst/video/gstvideofilter.h>
 #include <gst/video/video.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #include "filter_impl.h"
 #include "gstcudafilter.h"
 
@@ -44,6 +48,8 @@ GST_DEBUG_CATEGORY_STATIC(gst_cuda_filter_debug_category);
 #define GST_CAT_DEFAULT gst_cuda_filter_debug_category
 
 /* prototypes */
+static uint8_t* load_ppm_image(const char* filename,
+                               const struct frame_info* f_info);
 
 static void gst_cuda_filter_set_property(GObject* object,
                                          guint property_id,
@@ -77,6 +83,87 @@ enum
   PROP_BG_SAMPLING_RATE,
   PROP_BG_NUMBER_FRAMES
 };
+
+static uint8_t* load_ppm_image(const char* filename,
+                               const struct frame_info* f_info)
+{
+  FILE* fp = fopen(filename, "rb");
+  if (!fp)
+    {
+      fprintf(stderr, "Failed to open file: %s\n", filename);
+      return NULL;
+    }
+
+  char header[256];
+  if (fgets(header, sizeof(header), fp) == NULL)
+    {
+      fprintf(stderr, "Error reading header from file\n");
+      fclose(fp);
+      return NULL;
+    }
+  if (strncmp(header, "P6", 2) != 0)
+    {
+      fclose(fp);
+      fprintf(stderr, "Not a valid PPM file\n");
+      return NULL;
+    }
+  
+  // Ignore comments
+  char c;
+  while ((c = fgetc(fp)) == '#')
+    {
+      while ((c = fgetc(fp)) != '\n')
+        ;
+    }
+  ungetc(c, fp);
+
+  int max_val, width, height;
+  int num_items = fscanf(fp, "%d %d\n%d\n", &width, &height, &max_val);
+  if (num_items != 3)
+    {
+      fprintf(stderr, "Error reading width, height, and max value from file\n");
+      fclose(fp);
+      return NULL;
+    }
+  if (max_val != 255)
+    {
+      fclose(fp);
+      fprintf(stderr, "Only 8-bit PPM images are supported\n");
+      return NULL;
+    }
+
+  if (width != f_info->width || height != f_info->height)
+    {
+      fclose(fp);
+      fprintf(stderr, "Image dimensions do not match frame dimensions\n");
+      return NULL;
+    }
+
+  uint8_t* image_data = (uint8_t*)malloc(f_info->stride * (height));
+  if (!image_data)
+    {
+      fclose(fp);
+      fprintf(stderr, "Failed to allocate memory for image data\n");
+      return NULL;
+    }
+
+  // Real image is not strided but we need to copy it to a strided buffer
+  for (int i = 0; i < height; i++)
+    {
+      size_t bytes_to_read = width * 3;
+      if (fread(image_data + i * f_info->stride, 1, width * 3, fp) != bytes_to_read)
+        {
+          fclose(fp);
+          free(image_data);
+          fprintf(stderr, "Error reading image data from file\n");
+          return NULL;
+        }
+    }
+
+  fclose(fp);
+
+  return image_data;
+}
 
 /* pad templates */
 
@@ -323,10 +410,22 @@ static GstFlowReturn gst_cuda_filter_transform_frame_ip(GstVideoFilter* filter,
   // Set frame info
   struct frame_info f_info = {width, height, plane_stride, pixel_stride,
                               frame_timestamp};
+
+  // Load background image
+  static uint8_t* user_bg = NULL;
+  if (cudafilter->bg[0] != '\0' && user_bg == NULL)
+    {
+      user_bg = load_ppm_image(cudafilter->bg, &f_info);
+      if (!user_bg)
+        {
+          return GST_FLOW_ERROR;
+        }
+    }
+
   // Set filter params
-  struct filter_params f_params = {cudafilter->bg, cudafilter->th_low,
-                                   cudafilter->th_high, cudafilter->bg_sampling_rate,
-                                   cudafilter->bg_number_frames};
+  struct filter_params f_params = {
+    user_bg, cudafilter->th_low, cudafilter->th_high, cudafilter->bg_sampling_rate,
+    cudafilter->bg_number_frames};
 
   // Apply filter
   filter_impl(pixels, &f_info, &f_params);
