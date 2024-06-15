@@ -84,7 +84,9 @@ __device__ void _insertion_sort(std::byte* arr, int start, int end, int step)
 
 __global__ void estimate_background_median(_BE_FSIGN)
 {
-#define _BACKGROUND_ESTIMATION_MEDIAN_SPST // single position single thread
+#define _BACKGROUND_ESTIMATION_MEDIAN_ISORT
+  // #define _BACKGROUND_ESTIMATION_MEDIAN_LOCAL_HIST
+  // #define _BACKGROUND_ESTIMATION_MEDIAN_SHARED_HIST
 
   int yy = blockIdx.y * blockDim.y + threadIdx.y;
   int xx = blockIdx.x * blockDim.x + threadIdx.x;
@@ -94,7 +96,7 @@ __global__ void estimate_background_median(_BE_FSIGN)
 
   constexpr size_t PIXEL_STRIDE = N_CHANNELS;
 
-#ifdef _BACKGROUND_ESTIMATION_MEDIAN_SPST
+#ifdef _BACKGROUND_ESTIMATION_MEDIAN_ISORT
   // 3 channels, at most 42 buffers
   // 4 channels, at most 32 buffers
   std::byte B[128];
@@ -119,9 +121,69 @@ __global__ void estimate_background_median(_BE_FSIGN)
   for (int ii = 0; ii < N_CHANNELS; ++ii)
     ptr[ii] = B[(buffers_amount / 2) * N_CHANNELS + ii];
 #else
+#  ifdef _BACKGROUND_ESTIMATION_MEDIAN_LOCAL_HIST
+  // a histogram per channel
+  uint8_t H[N_CHANNELS * 256] = {0};
+
+  // for each buffer, for each channel, compute histogram
+  for (int ii = 0; ii < buffers_amount; ++ii)
+    {
+      uint8_t* ptr =
+        (uint8_t*)buffers[ii] + yy * bpitches[ii] + xx * PIXEL_STRIDE;
+      for (int jj = 0; jj < N_CHANNELS; ++jj)
+        ++H[jj * 256 + ptr[jj]];
+    }
+
+  // for each histogram, compute cumulative sum
+  uint8_t* outptr = (uint8_t*)out + yy * opitch + xx * PIXEL_STRIDE;
+  for (int ii = 0; ii < N_CHANNELS; ++ii)
+    {
+      uint8_t cumsum = 0;
+      int jj = 0;
+      for (; jj < 256 && cumsum < buffers_amount / 2 + 1; ++jj)
+        cumsum += H[ii * 256 + jj];
+      outptr[ii] = (uint8_t)(jj - 1);
+    }
+#  else
+#    ifdef _BACKGROUND_ESTIMATION_MEDIAN_SHARED_HIST
+  // each thread has `N_CHANNELS` histograms
+  extern __shared__ uint8_t H[];
+
+  constexpr size_t THREAD_STRIDE = 256 * N_CHANNELS;
+  size_t offset =
+    ((yy % blockDim.y) * blockDim.x + (xx % blockDim.x)) * THREAD_STRIDE;
+
+  // clean histograms
+  for (size_t ii = 0; ii < THREAD_STRIDE; ++ii)
+    H[offset + ii] = 0x00;
+
+  // for each buffer, compute histogram
+  for (int ii = 0; ii < buffers_amount; ++ii)
+    {
+      uint8_t* ptr =
+        (uint8_t*)buffers[ii] + yy * bpitches[ii] + xx * PIXEL_STRIDE;
+      for (int jj = 0; jj < N_CHANNELS; ++jj)
+        ++H[offset + jj * 256 + ptr[jj]];
+    }
+
+  // for each histogram, compute cumulative sum
+  uint8_t* outptr = (uint8_t*)out + yy * opitch + xx * PIXEL_STRIDE;
+  for (int ii = 0; ii < N_CHANNELS; ++ii)
+    {
+      uint8_t cumsum = 0;
+      int jj = 0;
+      for (; jj < 256 && cumsum < buffers_amount / 2 + 1; ++jj)
+        cumsum += H[offset + ii * 256 + jj];
+      outptr[ii] = (uint8_t)(jj - 1);
+    }
+#    else
+#    endif
+#  endif
 #endif
 
-#undef _BACKGROUND_ESTIMATION_MEDIAN_SPST
+  // #undef _BACKGROUND_ESTIMATION_MEDIAN_ISORT
+  // #undef _BACKGROUND_ESTIMATION_MEDIAN_LOCAL_HIST
+  // #undef _BACKGROUND_ESTIMATION_MEDIAN_SHARED_HIST
 }
 
 #undef _BE_FSIGN
@@ -854,10 +916,6 @@ namespace
         CHECK_CUDA_ERROR(err);
       }
 
-    dim3 blockSize(BLOCK_SIZE, BLOCK_SIZE);
-    dim3 gridSize((width + (blockSize.x - 1)) / blockSize.x,
-                  (height + (blockSize.y - 1)) / blockSize.y);
-
     // Convert samples and pitches to device memory
     std::byte** dbuffers;
     cudaMalloc(&dbuffers, dbuffers_amount * sizeof(std::byte*));
@@ -868,11 +926,33 @@ namespace
     cudaMemcpy(dpitches, pitches, dbuffers_amount * sizeof(size_t),
                cudaMemcpyHostToDevice);
 
+    size_t _BE_BLOCK_SIZE = BLOCK_SIZE;
+#ifdef _BACKGROUND_ESTIMATION_MEDIAN_SHARED_HIST
+    _BE_BLOCK_SIZE = is_median ? (N_CHANNELS > 3 ? 6 : 8) : BLOCK_SIZE;
+#endif
+    dim3 blockSize(_BE_BLOCK_SIZE, _BE_BLOCK_SIZE);
+    dim3 gridSize((width + (blockSize.x - 1)) / blockSize.x,
+                  (height + (blockSize.y - 1)) / blockSize.y);
+
 // Estimate background
 #define _BE_FPARAMS                                                            \
   dbuffers, dpitches, dbuffers_amount, *bg_model, *bg_pitch, width, height
-    is_median ? estimate_background_median<<<gridSize, blockSize>>>(_BE_FPARAMS)
-              : estimate_background_mean<<<gridSize, blockSize>>>(_BE_FPARAMS);
+
+    if (is_median)
+      {
+#ifdef _BACKGROUND_ESTIMATION_MEDIAN_SHARED_HIST
+#  define _SHARED_MEM_SIZE                                                     \
+    _BE_BLOCK_SIZE* _BE_BLOCK_SIZE* N_CHANNELS * 256 * sizeof(uint8_t)
+        estimate_background_median<<<gridSize, blockSize, _SHARED_MEM_SIZE>>>(
+          _BE_FPARAMS);
+#  undef _SHARED_MEM_SIZE
+#else
+        estimate_background_median<<<gridSize, blockSize>>>(_BE_FPARAMS);
+#endif
+      }
+    else
+      estimate_background_mean<<<gridSize, blockSize>>>(_BE_FPARAMS);
+
 #undef _BE_FPARAMS
 
     cudaError_t err = cudaDeviceSynchronize();
