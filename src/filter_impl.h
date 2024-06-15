@@ -8,7 +8,6 @@ extern "C"
 {
 #endif
 
-#define BG_SAMPLING_RATE 500 // sampling rate in ms
 #define BG_NUMBER_FRAMES 10  // number of frames to sample
 #define MAX_LAB_DISTANCE                                                       \
   292.0f // maximum distance in LAB space for sRGB pixels [0, 255]
@@ -27,6 +26,15 @@ extern "C"
   constexpr size_t N_CHANNELS = sizeof(rgb);
 #endif
 
+  struct filter_params
+  {
+    char* bg;
+    int th_low;
+    int th_high;
+    int bg_sampling_rate;
+    int bg_number_frame;
+  };
+
   struct frame_info
   {
     int width;
@@ -38,8 +46,7 @@ extern "C"
 
   void filter_impl(uint8_t* buffer,
                    const struct frame_info* buffer_info,
-                   int th_low,
-                   int th_high);
+                    const struct filter_params* params);
 
 #ifdef __cplusplus
 }

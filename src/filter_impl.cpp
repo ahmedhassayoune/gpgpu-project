@@ -30,7 +30,8 @@ static void update_bg_model(uint8_t* buffer,
                             const frame_info* buffer_info,
                             uint8_t** bg_model,
                             uint8_t* mask,
-                            bool is_median);
+                            bool is_median,
+                            int bg_sampling_rate);
 
 static void _selection_sort(uint8_t* bytes, int start, int end, int step);
 #define _BE_FSIGN                                                              \
@@ -76,8 +77,7 @@ extern "C"
 {
   void filter_impl(uint8_t* buffer,
                    const frame_info* buffer_info,
-                   int th_low,
-                   int th_high)
+                   const filter_params* params)
   {
     // Set first frame as background model
     static uint8_t* bg_model = buffer;
@@ -93,13 +93,15 @@ extern "C"
     opening_impl_inplace(cpy_buffer, buffer_info);
 
     // Apply hysteresis threshold
-    apply_hysteresis_threshold(cpy_buffer, buffer_info, th_low, th_high);
+    apply_hysteresis_threshold(cpy_buffer, buffer_info, params->th_low,
+                               params->th_high);
 
     // Apply masking
     apply_masking(buffer, buffer_info, cpy_buffer);
 
     // Update background model
-    update_bg_model(buffer, buffer_info, &bg_model, cpy_buffer, true);
+    update_bg_model(buffer, buffer_info, &bg_model, cpy_buffer, true,
+                    params->bg_sampling_rate);
 
     free(cpy_buffer);
   }
@@ -114,7 +116,8 @@ static void update_bg_model(uint8_t* buffer,
                             const frame_info* buffer_info,
                             uint8_t** bg_model,
                             uint8_t* mask,
-                            bool is_median)
+                            bool is_median,
+                            int bg_sampling_rate)
 {
   static uint8_t* frame_samples[BG_NUMBER_FRAMES];
   static int frame_samples_count = 0;
@@ -138,7 +141,7 @@ static void update_bg_model(uint8_t* buffer,
       // so we set it to null to reallocate new memory after
       *bg_model = nullptr;
     }
-  else if (buffer_info->timestamp - last_timestamp >= BG_SAMPLING_RATE)
+  else if (buffer_info->timestamp - last_timestamp >= bg_sampling_rate)
     {
       if (frame_samples_count < BG_NUMBER_FRAMES)
         {

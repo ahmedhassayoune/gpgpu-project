@@ -777,6 +777,7 @@ namespace
                        std::byte* dmask,
                        size_t mpitch,
                        const frame_info* buffer_info,
+                       const filter_params* params,
                        bool is_median)
   {
     static std::byte* dbuffer_samples[BG_NUMBER_FRAMES];
@@ -805,7 +806,7 @@ namespace
         // so we set it to null to reallocate new memory after
         *bg_model = nullptr;
       }
-    else if (buffer_info->timestamp - last_timestamp >= BG_SAMPLING_RATE)
+    else if (buffer_info->timestamp - last_timestamp >= params->bg_sampling_rate)
       {
         if (dbuffers_amount < BG_NUMBER_FRAMES)
           {
@@ -887,8 +888,7 @@ extern "C"
 {
   void filter_impl(uint8_t* src_buffer,
                    const frame_info* buffer_info,
-                   int th_low,
-                   int th_high)
+                   const filter_params* params)
   {
     int width = buffer_info->width;
     int height = buffer_info->height;
@@ -930,7 +930,7 @@ extern "C"
     opening_impl_inplace(dmask, mpitch, buffer_info);
 
     // Apply hysteresis thresholding
-    apply_hysteresis_threshold(dmask, mpitch, buffer_info, th_low, th_high);
+    apply_hysteresis_threshold(dmask, mpitch, buffer_info, params->th_low, params->th_high);
 
     // Apply masking
     apply_masking<<<gridSize, blockSize>>>(dbuffer, bpitch, dmask, mpitch,
@@ -940,7 +940,7 @@ extern "C"
 
     // Update background model
     update_bg_model(dbuffer, bpitch, &bg_buffer, &bg_pitch, dmask, mpitch,
-                    buffer_info, true);
+                    buffer_info, params, true);
 
     // Copy the result back to the host
     err = cudaMemcpy2D(src_buffer, src_stride, dbuffer, bpitch,
