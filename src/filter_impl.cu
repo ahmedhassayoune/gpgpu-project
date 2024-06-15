@@ -777,10 +777,11 @@ namespace
                        std::byte* dmask,
                        size_t mpitch,
                        const frame_info* buffer_info,
+                       const filter_params* params,
                        bool is_median)
   {
-    static std::byte* dbuffer_samples[BG_NUMBER_FRAMES];
-    static size_t pitches[BG_NUMBER_FRAMES];
+    static std::byte** dbuffer_samples = nullptr;
+    static size_t* pitches = nullptr;
     static int dbuffers_amount = 0;
     static double last_timestamp = 0.0;
 
@@ -790,6 +791,14 @@ namespace
     // First frame is set to the background model
     if (dbuffers_amount == 0)
       {
+        // Use unified memory to store the buffer samples
+        cudaError_t err;
+        err = cudaMallocManaged(&dbuffer_samples,
+                                params->bg_number_frames * sizeof(std::byte*));
+        CHECK_CUDA_ERROR(err);
+        err = cudaMallocManaged(&pitches, params->bg_number_frames * sizeof(size_t));
+        CHECK_CUDA_ERROR(err);
+
         // Copy buffer
         std::byte* cpy_buffer = nullptr;
         size_t cpy_pitch;
@@ -805,9 +814,9 @@ namespace
         // so we set it to null to reallocate new memory after
         *bg_model = nullptr;
       }
-    else if (buffer_info->timestamp - last_timestamp >= BG_SAMPLING_RATE)
+    else if (buffer_info->timestamp - last_timestamp >= params->bg_sampling_rate)
       {
-        if (dbuffers_amount < BG_NUMBER_FRAMES)
+        if (dbuffers_amount < params->bg_number_frames)
           {
             // Copy buffer and apply mask to remove foreground
             std::byte* cpy_buffer = nullptr;
@@ -830,14 +839,14 @@ namespace
                         *bg_model, *bg_pitch, buffer_info);
 
             // Shift frame samples
-            for (int i = 0; i < BG_NUMBER_FRAMES - 1; ++i)
+            for (int i = 0; i < params->bg_number_frames - 1; ++i)
               {
                 dbuffer_samples[i] = dbuffer_samples[i + 1];
                 pitches[i] = pitches[i + 1];
               }
 
-            dbuffer_samples[BG_NUMBER_FRAMES - 1] = cpy_buffer;
-            pitches[BG_NUMBER_FRAMES - 1] = cpy_pitch;
+            dbuffer_samples[params->bg_number_frames - 1] = cpy_buffer;
+            pitches[params->bg_number_frames - 1] = cpy_pitch;
             last_timestamp = buffer_info->timestamp;
           }
       }
@@ -858,28 +867,15 @@ namespace
     dim3 gridSize((width + (blockSize.x - 1)) / blockSize.x,
                   (height + (blockSize.y - 1)) / blockSize.y);
 
-    // Convert samples and pitches to device memory
-    std::byte** dbuffers;
-    cudaMalloc(&dbuffers, dbuffers_amount * sizeof(std::byte*));
-    cudaMemcpy(dbuffers, dbuffer_samples, dbuffers_amount * sizeof(std::byte*),
-               cudaMemcpyHostToDevice);
-    size_t* dpitches;
-    cudaMalloc(&dpitches, dbuffers_amount * sizeof(size_t));
-    cudaMemcpy(dpitches, pitches, dbuffers_amount * sizeof(size_t),
-               cudaMemcpyHostToDevice);
-
 // Estimate background
 #define _BE_FPARAMS                                                            \
-  dbuffers, dpitches, dbuffers_amount, *bg_model, *bg_pitch, width, height
+  dbuffer_samples, pitches, dbuffers_amount, *bg_model, *bg_pitch, width, height
     is_median ? estimate_background_median<<<gridSize, blockSize>>>(_BE_FPARAMS)
               : estimate_background_mean<<<gridSize, blockSize>>>(_BE_FPARAMS);
 #undef _BE_FPARAMS
 
     cudaError_t err = cudaDeviceSynchronize();
     CHECK_CUDA_ERROR(err);
-
-    cudaFree(dbuffers);
-    cudaFree(dpitches);
   }
 } // namespace
 
@@ -887,8 +883,7 @@ extern "C"
 {
   void filter_impl(uint8_t* src_buffer,
                    const frame_info* buffer_info,
-                   int th_low,
-                   int th_high)
+                   const filter_params* params)
   {
     int width = buffer_info->width;
     int height = buffer_info->height;
@@ -914,14 +909,22 @@ extern "C"
                        width * N_CHANNELS, height, cudaMemcpyDefault);
     CHECK_CUDA_ERROR(err);
 
+    // Set first frame as bg model or set it to user provided bg
+    static std::byte* bg_buffer = params->bg != nullptr ? nullptr : dbuffer;
+    static size_t bg_pitch = params->bg != nullptr ? 0 : bpitch;
+
+    if (bg_buffer == nullptr && params->bg != nullptr) {
+      err = cudaMallocPitch(&bg_buffer, &bg_pitch, width * N_CHANNELS, height);
+      CHECK_CUDA_ERROR(err);
+      err = cudaMemcpy2D(bg_buffer, bg_pitch, params->bg, src_stride,
+                         width * N_CHANNELS, height, cudaMemcpyDefault);
+      CHECK_CUDA_ERROR(err);
+    }
+
     // Set thread block and grid dimensions
     dim3 blockSize(BLOCK_SIZE, BLOCK_SIZE);
     dim3 gridSize((width + blockSize.x - 1) / blockSize.x,
                   (height + blockSize.y - 1) / blockSize.y);
-
-    // Set first frame as bg model
-    static std::byte* bg_buffer = dbuffer;
-    static size_t bg_pitch = bpitch;
 
     // Convert RGB to LAB
     rgb_to_lab_cuda(bg_buffer, bg_pitch, dmask, mpitch, buffer_info);
@@ -930,7 +933,7 @@ extern "C"
     opening_impl_inplace(dmask, mpitch, buffer_info);
 
     // Apply hysteresis thresholding
-    apply_hysteresis_threshold(dmask, mpitch, buffer_info, th_low, th_high);
+    apply_hysteresis_threshold(dmask, mpitch, buffer_info, params->th_low, params->th_high);
 
     // Apply masking
     apply_masking<<<gridSize, blockSize>>>(dbuffer, bpitch, dmask, mpitch,
@@ -938,9 +941,11 @@ extern "C"
     err = cudaDeviceSynchronize();
     CHECK_CUDA_ERROR(err);
 
-    // Update background model
-    update_bg_model(dbuffer, bpitch, &bg_buffer, &bg_pitch, dmask, mpitch,
-                    buffer_info, true);
+    // Update background model if no user background is provided
+    if (params->bg == nullptr) {
+      update_bg_model(dbuffer, bpitch, &bg_buffer, &bg_pitch, dmask, mpitch,
+                      buffer_info, params, true);
+    }
 
     // Copy the result back to the host
     err = cudaMemcpy2D(src_buffer, src_stride, dbuffer, bpitch,
