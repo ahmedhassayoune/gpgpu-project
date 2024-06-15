@@ -132,12 +132,22 @@ __global__ void estimate_background_median(_BE_FSIGN)
 //**                                                  **
 //******************************************************
 
+// Declare all constant variable outsite the kernel for better access time
+__constant__ float D65_XYZ[9] = {0.412453f, 0.357580f, 0.180423f,
+                            0.212671f, 0.715160f, 0.072169f,
+                            0.019334f, 0.119193f, 0.950227f};
+
+__constant__ float D65_Xn = 0.95047f;
+__constant__ float D65_Yn = 1.00000f;
+__constant__ float D65_Zn = 1.08883f;
+
+__constant__ float epsilon = 0.008856f;
+__constant__ float kappa = 903.3f;
+
+                            
 __device__ void
 rgbToXyz(float r, float g, float b, float& x, float& y, float& z)
 {
-  const float D65_XYZ[9] = {0.412453f, 0.357580f, 0.180423f,
-                            0.212671f, 0.715160f, 0.072169f,
-                            0.019334f, 0.119193f, 0.950227f};
 
   r = r / 255.0f;
   g = g / 255.0f;
@@ -158,16 +168,10 @@ rgbToXyz(float r, float g, float b, float& x, float& y, float& z)
 __device__ void
 xyzToLab(float x, float y, float z, float& l, float& a, float& b)
 {
-  const float D65_Xn = 0.95047f;
-  const float D65_Yn = 1.00000f;
-  const float D65_Zn = 1.08883f;
 
   x /= D65_Xn;
   y /= D65_Yn;
   z /= D65_Zn;
-
-  const float epsilon = 0.008856f;
-  const float kappa = 903.3f;
 
 #define NONLINEAR(C)                                                           \
   ((C) > epsilon ? __powf((C), 1.0f / 3.0f) : ((kappa * (C) + 16.0f) / 116.0f))
