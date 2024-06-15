@@ -418,18 +418,18 @@ __global__ void apply_threshold_on_marker(std::byte* buffer,
 
 __global__ void hysteresis_opti(std::byte* buffer,
                                 size_t bpitch,
-                                std::byte* out,
-                                size_t opitch,
                                 std::byte* marker,
                                 size_t mpitch,
                                 const int width,
                                 const int height,
-                                int low_th)
+                                int low_th,
+                                bool end)
 {
   int y = blockIdx.y * blockDim.y + threadIdx.y;
   int x = blockIdx.x * blockDim.x + threadIdx.x;
   __shared__ unsigned char changed;
 
+  rgb* buf_ptr = (rgb*)(buffer + y * bpitch);
   do
     {
       __syncthreads();
@@ -437,17 +437,16 @@ __global__ void hysteresis_opti(std::byte* buffer,
       __syncthreads();
 
       if ((x < width && y < height)
-          && (marker[y * mpitch + x] != std::byte{0}
-              && ((rgb*)(out + y * opitch))[x].r == 0))
+          && (marker[y * mpitch + x] != std::byte{0} && (buf_ptr[x].r != 255)))
         {
-          ((rgb*)(out + y * opitch))[x].r = 255;
+          buf_ptr[x].r = 255;
           changed = 1;
 
 // Check 8-neighbors
 #define C8N(cond, x, y)                                                        \
-  if ((cond) && ((rgb*)((buffer) + (y) * (bpitch)))[(x)].r > low_th)           \
+  if ((cond) && ((rgb*)(buffer + (y)*bpitch))[(x)].r > low_th)                 \
     {                                                                          \
-      (marker)[(y) * (mpitch) + (x)] = std::byte{1};                           \
+      marker[(y) * (mpitch) + (x)] = std::byte{1};                             \
     }
 
           C8N(x > 0 && y > 0, x - 1, y - 1)
@@ -461,9 +460,14 @@ __global__ void hysteresis_opti(std::byte* buffer,
 
 #undef C8N
         }
-
       __syncthreads();
   } while (changed);
+
+  // set all threshold1 values to 0
+  if (end && x < width && y < height && buf_ptr[x].r != 255)
+    {
+      buf_ptr[x].r = 0;
+    }
 }
 
 //******************************************************
@@ -645,16 +649,6 @@ namespace
     err = cudaMallocPitch(&marker, &mpitch, width, height);
     CHECK_CUDA_ERROR(err);
 
-    // Create an out buffer to store the final image
-    std::byte* out_buffer;
-    size_t opitch;
-    err = cudaMallocPitch(&out_buffer, &opitch, width * N_CHANNELS, height);
-    CHECK_CUDA_ERROR(err);
-
-    // And set it to black
-    err = cudaMemset2D(out_buffer, opitch, 0, width * N_CHANNELS, height);
-    CHECK_CUDA_ERROR(err);
-
     dim3 blockSize(2 * BLOCK_SIZE, 2 * BLOCK_SIZE);
     dim3 gridSize((width + (blockSize.x - 1)) / blockSize.x,
                   (height + (blockSize.y - 1)) / blockSize.y);
@@ -667,16 +661,12 @@ namespace
     // Apply hysteresis thresholding
     for (int i = 0; i < HYSTERESIS_ITER; i++)
       {
-        hysteresis_opti<<<gridSize, blockSize>>>(*buffer, *bpitch, out_buffer,
-                                                 opitch, marker, mpitch, width,
-                                                 height, low_th);
+        hysteresis_opti<<<gridSize, blockSize>>>(*buffer, *bpitch, marker,
+                                                 mpitch, width, height, low_th,
+                                                 i == HYSTERESIS_ITER - 1);
         err = cudaDeviceSynchronize();
         CHECK_CUDA_ERROR(err);
       }
-
-    cudaFree(*buffer);
-    *buffer = out_buffer;
-    *bpitch = opitch;
 
     cudaFree(marker);
   }
