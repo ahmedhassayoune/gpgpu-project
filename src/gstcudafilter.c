@@ -107,7 +107,7 @@ static uint8_t* load_ppm_image(const char* filename,
       fprintf(stderr, "Not a valid PPM file\n");
       return NULL;
     }
-  
+
   // Ignore comments
   char c;
   while ((c = fgetc(fp)) == '#')
@@ -151,7 +151,8 @@ static uint8_t* load_ppm_image(const char* filename,
   for (int i = 0; i < height; i++)
     {
       size_t bytes_to_read = width * 3;
-      if (fread(image_data + i * f_info->stride, 1, width * 3, fp) != bytes_to_read)
+      if (fread(image_data + i * f_info->stride, 1, width * 3, fp)
+          != bytes_to_read)
         {
           fclose(fp);
           free(image_data);
@@ -424,8 +425,8 @@ static GstFlowReturn gst_cuda_filter_transform_frame_ip(GstVideoFilter* filter,
 
   // Set filter params
   struct filter_params f_params = {
-    user_bg, cudafilter->th_low, cudafilter->th_high, cudafilter->bg_sampling_rate,
-    cudafilter->bg_number_frames};
+    user_bg, cudafilter->th_low, cudafilter->th_high,
+    cudafilter->bg_sampling_rate, cudafilter->bg_number_frames};
 
   // Apply filter
   filter_impl(pixels, &f_info, &f_params);

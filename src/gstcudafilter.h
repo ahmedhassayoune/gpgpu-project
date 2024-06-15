@@ -41,9 +41,9 @@ typedef struct _GstCudaFilterClass GstCudaFilterClass;
 struct _GstCudaFilter
 {
   GstVideoFilter base_cudafilter;
-  gchar* bg; // background model
-  gint th_low; // hysteresis threshold low
-  gint th_high; // hysteresis threshold high
+  gchar* bg;             // background model
+  gint th_low;           // hysteresis threshold low
+  gint th_high;          // hysteresis threshold high
   gint bg_sampling_rate; // sampling rate in ms
   gint bg_number_frames; // number of frames to sample
 };

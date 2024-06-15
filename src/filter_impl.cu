@@ -796,7 +796,8 @@ namespace
         err = cudaMallocManaged(&dbuffer_samples,
                                 params->bg_number_frames * sizeof(std::byte*));
         CHECK_CUDA_ERROR(err);
-        err = cudaMallocManaged(&pitches, params->bg_number_frames * sizeof(size_t));
+        err = cudaMallocManaged(&pitches,
+                                params->bg_number_frames * sizeof(size_t));
         CHECK_CUDA_ERROR(err);
 
         // Copy buffer
@@ -814,7 +815,8 @@ namespace
         // so we set it to null to reallocate new memory after
         *bg_model = nullptr;
       }
-    else if (buffer_info->timestamp - last_timestamp >= params->bg_sampling_rate)
+    else if (buffer_info->timestamp - last_timestamp
+             >= params->bg_sampling_rate)
       {
         if (dbuffers_amount < params->bg_number_frames)
           {
@@ -913,13 +915,15 @@ extern "C"
     static std::byte* bg_buffer = params->bg != nullptr ? nullptr : dbuffer;
     static size_t bg_pitch = params->bg != nullptr ? 0 : bpitch;
 
-    if (bg_buffer == nullptr && params->bg != nullptr) {
-      err = cudaMallocPitch(&bg_buffer, &bg_pitch, width * N_CHANNELS, height);
-      CHECK_CUDA_ERROR(err);
-      err = cudaMemcpy2D(bg_buffer, bg_pitch, params->bg, src_stride,
-                         width * N_CHANNELS, height, cudaMemcpyDefault);
-      CHECK_CUDA_ERROR(err);
-    }
+    if (bg_buffer == nullptr && params->bg != nullptr)
+      {
+        err =
+          cudaMallocPitch(&bg_buffer, &bg_pitch, width * N_CHANNELS, height);
+        CHECK_CUDA_ERROR(err);
+        err = cudaMemcpy2D(bg_buffer, bg_pitch, params->bg, src_stride,
+                           width * N_CHANNELS, height, cudaMemcpyDefault);
+        CHECK_CUDA_ERROR(err);
+      }
 
     // Set thread block and grid dimensions
     dim3 blockSize(BLOCK_SIZE, BLOCK_SIZE);
@@ -933,7 +937,8 @@ extern "C"
     opening_impl_inplace(dmask, mpitch, buffer_info);
 
     // Apply hysteresis thresholding
-    apply_hysteresis_threshold(dmask, mpitch, buffer_info, params->th_low, params->th_high);
+    apply_hysteresis_threshold(dmask, mpitch, buffer_info, params->th_low,
+                               params->th_high);
 
     // Apply masking
     apply_masking<<<gridSize, blockSize>>>(dbuffer, bpitch, dmask, mpitch,
@@ -942,10 +947,11 @@ extern "C"
     CHECK_CUDA_ERROR(err);
 
     // Update background model if no user background is provided
-    if (params->bg == nullptr) {
-      update_bg_model(dbuffer, bpitch, &bg_buffer, &bg_pitch, dmask, mpitch,
-                      buffer_info, params, true);
-    }
+    if (params->bg == nullptr)
+      {
+        update_bg_model(dbuffer, bpitch, &bg_buffer, &bg_pitch, dmask, mpitch,
+                        buffer_info, params, true);
+      }
 
     // Copy the result back to the host
     err = cudaMemcpy2D(src_buffer, src_stride, dbuffer, bpitch,
