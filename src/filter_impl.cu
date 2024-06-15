@@ -463,7 +463,7 @@ __global__ void hysteresis_opti(std::byte* buffer,
       __syncthreads();
   } while (changed);
 
-  // set all threshold1 values to 0
+  // set all non max values to 0
   if (end && x < width && y < height && buf_ptr[x].r != 255)
     {
       buf_ptr[x].r = 0;
