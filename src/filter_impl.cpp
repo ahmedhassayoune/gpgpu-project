@@ -27,9 +27,10 @@ enum op_type
 
 /* prototypes */
 static void update_bg_model(uint8_t* buffer,
-                            const frame_info* buffer_info,
                             uint8_t** bg_model,
                             uint8_t* mask,
+                            const frame_info* buffer_info,
+                            const filter_params* params,
                             bool is_median);
 
 static void _selection_sort(uint8_t* bytes, int start, int end, int step);
@@ -76,11 +77,10 @@ extern "C"
 {
   void filter_impl(uint8_t* buffer,
                    const frame_info* buffer_info,
-                   int th_low,
-                   int th_high)
+                   const filter_params* params)
   {
     // Set first frame as background model
-    static uint8_t* bg_model = buffer;
+    static uint8_t* bg_model = params->bg != nullptr ? params->bg : buffer;
 
     // Copy frame buffer
     uint8_t* cpy_buffer = nullptr;
@@ -93,13 +93,18 @@ extern "C"
     opening_impl_inplace(cpy_buffer, buffer_info);
 
     // Apply hysteresis threshold
-    apply_hysteresis_threshold(cpy_buffer, buffer_info, th_low, th_high);
+    apply_hysteresis_threshold(cpy_buffer, buffer_info, params->th_low,
+                               params->th_high);
 
     // Apply masking
     apply_masking(buffer, buffer_info, cpy_buffer);
 
-    // Update background model
-    update_bg_model(buffer, buffer_info, &bg_model, cpy_buffer, true);
+    // Update background model if user didn't provide one
+    if (params->bg == nullptr)
+      {
+        update_bg_model(buffer, &bg_model, cpy_buffer, buffer_info, params,
+                        true);
+      }
 
     free(cpy_buffer);
   }
@@ -111,21 +116,27 @@ extern "C"
 //******************************************************
 
 static void update_bg_model(uint8_t* buffer,
-                            const frame_info* buffer_info,
                             uint8_t** bg_model,
                             uint8_t* mask,
+                            const frame_info* buffer_info,
+                            const filter_params* params,
                             bool is_median)
 {
-  static uint8_t* frame_samples[BG_NUMBER_FRAMES];
+  static uint8_t** frame_samples = nullptr;
   static int frame_samples_count = 0;
   static double last_timestamp = 0.0;
 
   int height = buffer_info->height;
   int stride = buffer_info->stride;
+  int bg_sampling_rate = params->bg_sampling_rate;
+  int bg_number_frames = params->bg_number_frames;
 
   // First frame is set to the background model
   if (frame_samples_count == 0)
     {
+      // Allocate memory for frame samples
+      frame_samples = (uint8_t**)malloc(bg_number_frames * sizeof(uint8_t*));
+
       // Copy buffer
       uint8_t* cpy_buffer = nullptr;
       copy_buffer(buffer, &cpy_buffer, buffer_info, nullptr, nullptr);
@@ -138,9 +149,9 @@ static void update_bg_model(uint8_t* buffer,
       // so we set it to null to reallocate new memory after
       *bg_model = nullptr;
     }
-  else if (buffer_info->timestamp - last_timestamp >= BG_SAMPLING_RATE)
+  else if (buffer_info->timestamp - last_timestamp >= bg_sampling_rate)
     {
-      if (frame_samples_count < BG_NUMBER_FRAMES)
+      if (frame_samples_count < bg_number_frames)
         {
           // Copy buffer and apply mask to remove foreground
           uint8_t* cpy_buffer = nullptr;
@@ -158,12 +169,12 @@ static void update_bg_model(uint8_t* buffer,
           copy_buffer(buffer, &cpy_buffer, buffer_info, mask, *bg_model);
 
           // Shift frame samples
-          for (int i = 0; i < BG_NUMBER_FRAMES - 1; ++i)
+          for (int i = 0; i < bg_number_frames - 1; ++i)
             {
               frame_samples[i] = frame_samples[i + 1];
             }
 
-          frame_samples[BG_NUMBER_FRAMES - 1] = cpy_buffer;
+          frame_samples[bg_number_frames - 1] = cpy_buffer;
           last_timestamp = buffer_info->timestamp;
         }
     }
