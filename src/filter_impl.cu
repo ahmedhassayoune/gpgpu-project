@@ -144,7 +144,7 @@ rgbToXyz(float r, float g, float b, float& x, float& y, float& z)
   b = b / 255.0f;
 
 #define GAMMA_CORRECT(C)                                                       \
-  ((C) > 0.04045f ? powf(((C) + 0.055f) / 1.055f, 2.4f) : (C) / 12.92f)
+  ((C) > 0.04045f ? __powf(((C) + 0.055f) / 1.055f, 2.4f) : (C) / 12.92f)
   r = GAMMA_CORRECT(r);
   g = GAMMA_CORRECT(g);
   b = GAMMA_CORRECT(b);
@@ -170,7 +170,7 @@ xyzToLab(float x, float y, float z, float& l, float& a, float& b)
   const float kappa = 903.3f;
 
 #define NONLINEAR(C)                                                           \
-  ((C) > epsilon ? powf((C), 1.0f / 3.0f) : ((kappa * (C) + 16.0f) / 116.0f))
+  ((C) > epsilon ? __powf((C), 1.0f / 3.0f) : ((kappa * (C) + 16.0f) / 116.0f))
   float fx = NONLINEAR(x);
   float fy = NONLINEAR(y);
   float fz = NONLINEAR(z);
