@@ -45,7 +45,7 @@ struct _GstCudaFilter
   gint th_low; // hysteresis threshold low
   gint th_high; // hysteresis threshold high
   gint bg_sampling_rate; // sampling rate in ms
-  gint bg_number_frame; // number of frames to sample
+  gint bg_number_frames; // number of frames to sample
 };
 
 struct _GstCudaFilterClass

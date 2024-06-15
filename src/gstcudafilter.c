@@ -75,7 +75,7 @@ enum
   PROP_TH_LOW,
   PROP_TH_HIGH,
   PROP_BG_SAMPLING_RATE,
-  PROP_BG_NUMBER_FRAME
+  PROP_BG_NUMBER_FRAMES
 };
 
 /* pad templates */
@@ -149,8 +149,8 @@ static void gst_cuda_filter_class_init(GstCudaFilterClass* klass)
                      10000, 500, G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
 
   g_object_class_install_property(
-    gobject_class, PROP_BG_NUMBER_FRAME,
-    g_param_spec_int("bg-number-frame", "Background Number Frame",
+    gobject_class, PROP_BG_NUMBER_FRAMES,
+    g_param_spec_int("bg-number-frames", "Background Number Frames",
                      "Number of frames used for background estimation", 0, 100,
                      10, G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
 }
@@ -161,7 +161,7 @@ static void gst_cuda_filter_init(GstCudaFilter* cudafilter)
   cudafilter->th_low = 3;
   cudafilter->th_high = 30;
   cudafilter->bg_sampling_rate = 500;
-  cudafilter->bg_number_frame = 10;
+  cudafilter->bg_number_frames = 10;
 }
 
 void gst_cuda_filter_set_property(GObject* object,
@@ -188,8 +188,8 @@ void gst_cuda_filter_set_property(GObject* object,
     case PROP_BG_SAMPLING_RATE:
       cudafilter->bg_sampling_rate = g_value_get_int(value);
       break;
-    case PROP_BG_NUMBER_FRAME:
-      cudafilter->bg_number_frame = g_value_get_int(value);
+    case PROP_BG_NUMBER_FRAMES:
+      cudafilter->bg_number_frames = g_value_get_int(value);
       break;
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID(object, property_id, pspec);
@@ -220,8 +220,8 @@ void gst_cuda_filter_get_property(GObject* object,
     case PROP_BG_SAMPLING_RATE:
       g_value_set_int(value, cudafilter->bg_sampling_rate);
       break;
-    case PROP_BG_NUMBER_FRAME:
-      g_value_set_int(value, cudafilter->bg_number_frame);
+    case PROP_BG_NUMBER_FRAMES:
+      g_value_set_int(value, cudafilter->bg_number_frames);
       break;
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID(object, property_id, pspec);
@@ -326,7 +326,7 @@ static GstFlowReturn gst_cuda_filter_transform_frame_ip(GstVideoFilter* filter,
   // Set filter params
   struct filter_params f_params = {cudafilter->bg, cudafilter->th_low,
                                    cudafilter->th_high, cudafilter->bg_sampling_rate,
-                                   cudafilter->bg_number_frame};
+                                   cudafilter->bg_number_frames};
 
   // Apply filter
   filter_impl(pixels, &f_info, &f_params);
