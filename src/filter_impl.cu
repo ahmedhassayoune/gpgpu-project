@@ -967,6 +967,7 @@ extern "C"
                        cudaMemcpyDeviceToHost);
     CHECK_CUDA_ERROR(err);
 
+    cudaFree(intermediate_buffer);
     cudaFree(dmask);
     cudaFree(dbuffer);
   }
