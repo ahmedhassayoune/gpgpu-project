@@ -28,7 +28,7 @@ __device__ bool hysteresis_has_changed;
 __global__ void resize_pixels(std::byte* in, size_t ipxsize, size_t ipitch, std::byte* out, size_t opxsize, size_t opitch, int width, int height){
   int yy = blockIdx.y * blockDim.y + threadIdx.y;
   int xx = blockIdx.x * blockDim.x + threadIdx.x;
-  if (xx < width || yy < height) {
+  if (xx < width && yy < height) {
     size_t min_px_size = min(ipxsize, opxsize);
     for (size_t i = 0; i < min_px_size; ++i) {
       out[yy * opitch + xx * opxsize + i] = in[yy * ipitch + xx * ipxsize + i];
