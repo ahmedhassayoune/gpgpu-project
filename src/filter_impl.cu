@@ -6,6 +6,7 @@
 #include <thread>
 
 #define BLOCK_SIZE 16
+#define HYSTERESIS_ITER 5
 
 #define CHECK_CUDA_ERROR(val) check((val), #val, __FILE__, __LINE__)
 template <typename T>
@@ -22,8 +23,6 @@ void check(T err,
       std::exit(EXIT_FAILURE);
     }
 }
-
-__device__ bool hysteresis_has_changed;
 
 __global__ void resize_pixels(std::byte* in,
                               size_t ipxsize,
@@ -414,7 +413,7 @@ __global__ void morphological_dilation(std::byte* buffer,
 /// @return
 __global__ void apply_threshold_on_marker(std::byte* buffer,
                                           size_t bpitch,
-                                          bool* marker,
+                                          std::byte* marker,
                                           size_t mpitch,
                                           const int width,
                                           const int height,
@@ -427,74 +426,62 @@ __global__ void apply_threshold_on_marker(std::byte* buffer,
     return;
 
   rgb* buffer_line = (rgb*)(buffer + y * bpitch);
-  bool* marker_line = (bool*)((std::byte*)marker + y * mpitch);
 
-  marker_line[x] = buffer_line[x].r > high_threshold;
+  marker[y * mpitch + x] =
+    buffer_line[x].r > high_threshold ? std::byte{1} : std::byte{0};
 }
 
-/// @brief Reconstruct the hysteresis thresholding image from the marker
-/// @param buffer The input buffer
-/// @param bpitch The pitch of the input buffer
-/// @param out The output buffer
-/// @param opitch The pitch of the output buffer
-/// @param marker The marker buffer
-/// @param mpitch The pitch of the marker buffer
-/// @param buffer_info The buffer info
-/// @param low_threshold The low threshold
-/// @return
-__global__ void reconstruct_image(std::byte* buffer,
-                                  size_t bpitch,
-                                  std::byte* out,
-                                  size_t opitch,
-                                  bool* marker,
-                                  size_t mpitch,
-                                  const int width,
-                                  const int height,
-                                  int low_threshold)
+__global__ void hysteresis_opti(std::byte* buffer,
+                                size_t bpitch,
+                                std::byte* marker,
+                                size_t mpitch,
+                                const int width,
+                                const int height,
+                                int low_th,
+                                bool end)
 {
   int y = blockIdx.y * blockDim.y + threadIdx.y;
   int x = blockIdx.x * blockDim.x + threadIdx.x;
+  __shared__ unsigned char changed;
 
-  if (x >= width || y >= height)
-    return;
-
-  rgb* out_line = (rgb*)(out + y * opitch);
-  bool* marker_line = (bool*)((std::byte*)marker + y * mpitch);
-
-  if (!marker_line[x] || out_line[x].r != 0)
+  rgb* buf_ptr = (rgb*)(buffer + y * bpitch);
+  do
     {
-      return;
+      __syncthreads();
+      changed = 0;
+      __syncthreads();
+
+      if ((x < width && y < height)
+          && (marker[y * mpitch + x] != std::byte{0} && (buf_ptr[x].r != 255)))
+        {
+          buf_ptr[x].r = 255;
+          changed = 1;
+
+// Check 8-neighbors
+#define C8N(cond, x, y)                                                        \
+  if ((cond) && ((rgb*)(buffer + (y)*bpitch))[(x)].r > low_th)                 \
+    {                                                                          \
+      marker[(y) * (mpitch) + (x)] = std::byte{1};                             \
     }
 
-  // Set the pixel to white
-  out_line[x].r = 255;
-  out_line[x].g = 255;
-  out_line[x].b = 255;
+          C8N(x > 0 && y > 0, x - 1, y - 1)
+          C8N(y > 0, x, y - 1)
+          C8N(x < width - 1 && y > 0, x + 1, y - 1)
+          C8N(x < width - 1, x + 1, y)
+          C8N(x < width - 1 && y < height - 1, x + 1, y + 1)
+          C8N(y < height - 1, x, y + 1)
+          C8N(x > 0 && y < height - 1, x - 1, y + 1)
+          C8N(x > 0, x - 1, y)
 
-  // Mark the 8-connected neighbors if they are above the low threshold
-  for (int i = -1; i <= 1; i++)
-    {
-      for (int j = -1; j <= 1; j++)
-        {
-          int ny = y + j;
-          int nx = x + i;
-          // Skip the current pixel
-          if ((i == 0 && j == 0) || nx < 0 || nx >= width || ny < 0
-              || ny >= height)
-            {
-              continue;
-            }
-
-          // Check if the pixel is within the image boundaries
-          rgb* buffer_line = (rgb*)(buffer + ny * bpitch);
-          bool* neighbor_marker_line =
-            (bool*)((std::byte*)marker + ny * mpitch);
-          if (!neighbor_marker_line[nx] && buffer_line[nx].r > low_threshold)
-            {
-              neighbor_marker_line[nx] = true;
-              hysteresis_has_changed = true;
-            }
+#undef C8N
         }
+      __syncthreads();
+  } while (changed);
+
+  // set all non max values to 0
+  if (end && x < width && y < height && buf_ptr[x].r != 255)
+    {
+      buf_ptr[x].r = 0;
     }
 }
 
@@ -655,83 +642,48 @@ namespace
   /// @param buffer_info The buffer info
   /// @param low_threshold The low threshold
   /// @param high_threshold The high threshold
-  void apply_hysteresis_threshold(std::byte* buffer,
-                                  size_t bpitch,
+  void apply_hysteresis_threshold(std::byte** buffer,
+                                  size_t* bpitch,
                                   const frame_info* buffer_info,
-                                  int low_threshold,
-                                  int high_threshold)
+                                  int low_th,
+                                  int high_th)
   {
     int width = buffer_info->width;
     int height = buffer_info->height;
 
     // Ensure low threshold is less than high threshold
-    if (low_threshold > high_threshold)
+    if (low_th > high_th)
       {
-        low_threshold = high_threshold;
+        low_th = high_th;
       }
 
     // Create a marker buffer to store the pixels that are above the high threshold
-    bool* marker;
+    std::byte* marker;
     size_t mpitch;
     cudaError_t err;
-    err = cudaMallocPitch(&marker, &mpitch, width * sizeof(bool), height);
+    err = cudaMallocPitch(&marker, &mpitch, width, height);
     CHECK_CUDA_ERROR(err);
 
-    // And set it to false
-    err = cudaMemset2D(marker, mpitch, 0, width * sizeof(bool), height);
-    CHECK_CUDA_ERROR(err);
-
-    // Create an out buffer to store the final image
-    std::byte* out_buffer;
-    size_t opitch;
-    err = cudaMallocPitch(&out_buffer, &opitch, width * N_CHANNELS, height);
-    CHECK_CUDA_ERROR(err);
-
-    // And set it to black
-    err = cudaMemset2D(out_buffer, opitch, 0, width * N_CHANNELS, height);
-    CHECK_CUDA_ERROR(err);
-
-    dim3 blockSize(BLOCK_SIZE, BLOCK_SIZE);
+    dim3 blockSize(2 * BLOCK_SIZE, 2 * BLOCK_SIZE);
     dim3 gridSize((width + (blockSize.x - 1)) / blockSize.x,
                   (height + (blockSize.y - 1)) / blockSize.y);
     apply_threshold_on_marker<<<gridSize, blockSize>>>(
-      buffer, bpitch, marker, mpitch, width, height, high_threshold);
+      *buffer, *bpitch, marker, mpitch, width, height, high_th);
 
     err = cudaDeviceSynchronize();
     CHECK_CUDA_ERROR(err);
 
     // Apply hysteresis thresholding
-    bool h_hysteresis_has_changed = true;
-    while (h_hysteresis_has_changed)
+    for (int i = 0; i < HYSTERESIS_ITER; i++)
       {
-        // Copy the value of hysteresis_has_changed to device
-        h_hysteresis_has_changed = false;
-        err =
-          cudaMemcpyToSymbol(hysteresis_has_changed, &h_hysteresis_has_changed,
-                             sizeof(h_hysteresis_has_changed));
-        CHECK_CUDA_ERROR(err);
-
-        reconstruct_image<<<gridSize, blockSize>>>(
-          buffer, bpitch, out_buffer, opitch, marker, mpitch, width, height,
-          low_threshold);
-
+        hysteresis_opti<<<gridSize, blockSize>>>(*buffer, *bpitch, marker,
+                                                 mpitch, width, height, low_th,
+                                                 i == (HYSTERESIS_ITER - 1));
         err = cudaDeviceSynchronize();
-        CHECK_CUDA_ERROR(err);
-
-        // Retrieve the value of hysteresis_has_changed from device
-        err = cudaMemcpyFromSymbol(&h_hysteresis_has_changed,
-                                   hysteresis_has_changed,
-                                   sizeof(hysteresis_has_changed));
         CHECK_CUDA_ERROR(err);
       }
 
-    // Copy the final image to the buffer
-    err = cudaMemcpy2D(buffer, bpitch, out_buffer, opitch, width * N_CHANNELS,
-                       height, cudaMemcpyDefault);
-    CHECK_CUDA_ERROR(err);
-
     cudaFree(marker);
-    cudaFree(out_buffer);
   }
 
   //******************************************************
@@ -988,7 +940,7 @@ extern "C"
     opening_impl_inplace(dmask, mpitch, buffer_info);
 
     // Apply hysteresis thresholding
-    apply_hysteresis_threshold(dmask, mpitch, buffer_info, params->th_low,
+    apply_hysteresis_threshold(&dmask, &mpitch, buffer_info, params->th_low,
                                params->th_high);
 
     // Apply masking
