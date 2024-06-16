@@ -25,6 +25,17 @@ void check(T err,
 
 __device__ bool hysteresis_has_changed;
 
+__global__ void resize_pixels(std::byte* in, size_t ipxsize, size_t ipitch, std::byte* out, size_t opxsize, size_t opitch, int width, int height){
+  int yy = blockIdx.y * blockDim.y + threadIdx.y;
+  int xx = blockIdx.x * blockDim.x + threadIdx.x;
+  if (xx < width || yy < height) {
+    size_t min_px_size = min(ipxsize, opxsize);
+    for (size_t i = 0; i < min_px_size; ++i) {
+      out[yy * opitch + xx * opxsize + i] = in[yy * ipitch + xx * ipxsize + i];
+    }
+  }
+}
+
 //******************************************************
 //**                                                  **
 //**               Background Estimation              **
@@ -251,7 +262,7 @@ __global__ void morphological_erosion(std::byte* buffer,
 
   if (xx >= width || yy >= height)
     return;
-  unsigned int res = 0xff_ff_ff_ff;
+  unsigned int res = 0xffffffff;
 
   // Compute the minimum value in the 5x5 neighborhood
   for (int j = yy - 2; j <= yy + 2; j++)
@@ -298,7 +309,7 @@ __global__ void morphological_dilation(std::byte* buffer,
 
   if (xx >= width || yy >= height)
     return;
-  unsigned int res = 0x00_00_00_00;
+  unsigned int res = 0x00000000;
 
   // Compute the minimum value in the 5x5 neighborhood
   for (int j = yy - 2; j <= yy + 2; j++)
@@ -842,24 +853,22 @@ extern "C"
     int height = buffer_info->height;
     int src_stride = buffer_info->stride;
 
-    assert(N_CHANNELS == buffer_info->pixel_stride);
-    std::byte *dmask, *dbuffer;
-    size_t mpitch, bpitch;
+    std::byte *dmask, *dbuffer, *intermediate_buffer;
+    size_t mpitch, bpitch, ipitch;
 
     cudaError_t err;
 
     // Allocate memory on the device
+    err = cudaMallocPitch(&intermediate_buffer, &ipitch, width * buffer_info->pixel_stride, height);
+    CHECK_CUDA_ERROR(err);
     err = cudaMallocPitch(&dmask, &mpitch, width * N_CHANNELS, height);
     CHECK_CUDA_ERROR(err);
     err = cudaMallocPitch(&dbuffer, &bpitch, width * N_CHANNELS, height);
     CHECK_CUDA_ERROR(err);
 
     // Copy the input buffer to the device
-    err = cudaMemcpy2D(dmask, mpitch, src_buffer, src_stride,
-                       width * N_CHANNELS, height, cudaMemcpyDefault);
-    CHECK_CUDA_ERROR(err);
-    err = cudaMemcpy2D(dbuffer, bpitch, src_buffer, src_stride,
-                       width * N_CHANNELS, height, cudaMemcpyDefault);
+    err = cudaMemcpy2D(intermediate_buffer, ipitch, src_buffer, src_stride, 
+                      width * buffer_info->pixel_stride, height, cudaMemcpyHostToDevice);
     CHECK_CUDA_ERROR(err);
 
     // Set first frame as bg model or set it to user provided bg
@@ -880,6 +889,19 @@ extern "C"
     dim3 blockSize(BLOCK_SIZE, BLOCK_SIZE);
     dim3 gridSize((width + blockSize.x - 1) / blockSize.x,
                   (height + blockSize.y - 1) / blockSize.y);
+    
+    resize_pixels<<<gridSize, blockSize>>>(
+      intermediate_buffer, buffer_info->pixel_stride, ipitch,
+      dmask, N_CHANNELS, mpitch, width, height
+    );
+
+    resize_pixels<<<gridSize, blockSize>>>(
+      intermediate_buffer, buffer_info->pixel_stride, ipitch,
+      dbuffer, N_CHANNELS, bpitch, width, height
+    );
+
+    err = cudaDeviceSynchronize();
+    CHECK_CUDA_ERROR(err);
 
     // Convert RGB to LAB
     rgb_to_lab_cuda(bg_buffer, bg_pitch, dmask, mpitch, buffer_info);
@@ -904,9 +926,19 @@ extern "C"
                         buffer_info, params, true);
       }
 
+
+    resize_pixels<<<gridSize, blockSize>>>(
+      dbuffer, N_CHANNELS, bpitch,
+      intermediate_buffer, buffer_info->pixel_stride, ipitch, width, height
+    );
+
+    err = cudaDeviceSynchronize();
+    CHECK_CUDA_ERROR(err);
+    
+
     // Copy the result back to the host
-    err = cudaMemcpy2D(src_buffer, src_stride, dbuffer, bpitch,
-                       width * N_CHANNELS, height, cudaMemcpyDefault);
+    err = cudaMemcpy2D(src_buffer, src_stride, intermediate_buffer, ipitch,
+                       width * buffer_info->pixel_stride, height, cudaMemcpyDeviceToHost);
     CHECK_CUDA_ERROR(err);
 
     cudaFree(dmask);

@@ -14,7 +14,7 @@ extern "C"
   struct rgb
   {
     uint8_t r, g, b;
-    u_int32_t aligner[];
+    uint32_t aligner[];
   };
 
   struct LAB
