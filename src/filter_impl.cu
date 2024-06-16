@@ -137,16 +137,16 @@ __constant__ float D65_XYZ[9] = {0.412453f, 0.357580f, 0.180423f,
                             0.212671f, 0.715160f, 0.072169f,
                             0.019334f, 0.119193f, 0.950227f};
 
-__constant__ float D65_Xn = 0.95047f;
-__constant__ float D65_Yn = 1.00000f;
-__constant__ float D65_Zn = 1.08883f;
+__constant__ float D65_XN = 0.95047f;
+__constant__ float D65_YN = 1.00000f;
+__constant__ float D65_ZN = 1.08883f;
 
-__constant__ float epsilon = 0.008856f;
-__constant__ float kappa = 903.3f;
+__constant__ float EPSILON = 0.008856f;
+__constant__ float KAPPA = 903.3f;
 
                             
 __device__ void
-rgbToXyz(float r, float g, float b, float& x, float& y, float& z)
+rgbToLab(float r, float g, float b, float& l_, float& a_, float& b_)
 {
 
   r = r / 255.0f;
@@ -160,29 +160,20 @@ rgbToXyz(float r, float g, float b, float& x, float& y, float& z)
   b = GAMMA_CORRECT(b);
 #undef GAMMA_CORRECT
 
-  x = r * D65_XYZ[0] + g * D65_XYZ[1] + b * D65_XYZ[2];
-  y = r * D65_XYZ[3] + g * D65_XYZ[4] + b * D65_XYZ[5];
-  z = r * D65_XYZ[6] + g * D65_XYZ[7] + b * D65_XYZ[8];
-}
-
-__device__ void
-xyzToLab(float x, float y, float z, float& l, float& a, float& b)
-{
-
-  x /= D65_Xn;
-  y /= D65_Yn;
-  z /= D65_Zn;
+  r = (r * D65_XYZ[0] + g * D65_XYZ[1] + b * D65_XYZ[2]) / D65_XN;
+  g = (r * D65_XYZ[3] + g * D65_XYZ[4] + b * D65_XYZ[5]) / D65_YN;
+  b = (r * D65_XYZ[6] + g * D65_XYZ[7] + b * D65_XYZ[8]) / D65_ZN;
 
 #define NONLINEAR(C)                                                           \
-  ((C) > epsilon ? __powf((C), 1.0f / 3.0f) : ((kappa * (C) + 16.0f) / 116.0f))
-  float fx = NONLINEAR(x);
-  float fy = NONLINEAR(y);
-  float fz = NONLINEAR(z);
+  ((C) > EPSILON ? __powf((C), 1.0f / 3.0f) : ((KAPPA * (C) + 16.0f) / 116.0f))
+  float fx = NONLINEAR(r);
+  float fy = NONLINEAR(g);
+  float fz = NONLINEAR(b);
 #undef NONLINEAR
 
-  l = (116.0f * fy) - 16.0f;
-  a = 500.0f * (fx - fy);
-  b = 200.0f * (fy - fz);
+  l_ = (116.0f * fy) - 16.0f;
+  a_ = 500.0f * (fx - fy);
+  b_ = 200.0f * (fy - fz);
 }
 
 __global__ void rgbToLabDistanceKernel(std::byte* referenceBuffer,
@@ -192,55 +183,25 @@ __global__ void rgbToLabDistanceKernel(std::byte* referenceBuffer,
                                        const int width,
                                        const int height)
 {
-    __shared__ float sharedReference[BLOCK_SIZE][BLOCK_SIZE][3];
-    __shared__ float sharedCurrent[BLOCK_SIZE][BLOCK_SIZE][3];
+  int x = blockIdx.x * blockDim.x + threadIdx.x;
+  int y = blockIdx.y * blockDim.y + threadIdx.y;
 
-    int x = blockIdx.x * blockDim.x + threadIdx.x;
-    int y = blockIdx.y * blockDim.y + threadIdx.y;
+  if (x >= width || y >= height)
+    return;
 
-    if (x >= width || y >= height) return;
+  float LRef, ARef, BRef;
+  rgb ref_pixel = ((rgb*)(referenceBuffer + y * rpitch))[x];
+  rgbToLab(ref_pixel.r, ref_pixel.g, ref_pixel.b, LRef, ARef, BRef);
 
-    rgb* refLinePtr = (rgb*)(referenceBuffer + y * rpitch);
-    rgb* linePtr = (rgb*)(buffer + y * bpitch);
+  float L, A, B;
+  rgb buf_pixel = ((rgb*)(buffer + y * bpitch))[x];
+  rgbToLab(buf_pixel.r, buf_pixel.g, buf_pixel.b, L, A, B);
 
-    // Charger les pixels dans la mémoire partagée
-    sharedReference[threadIdx.y][threadIdx.x][0] = refLinePtr[x].r / 255.0f;
-    sharedReference[threadIdx.y][threadIdx.x][1] = refLinePtr[x].g / 255.0f;
-    sharedReference[threadIdx.y][threadIdx.x][2] = refLinePtr[x].b / 255.0f;
+  float distance = sqrtf((L - LRef) * (L - LRef) + (A - ARef) * (A - ARef) + (B - BRef) * (B - BRef));
+  uint8_t distance8bit =
+    static_cast<uint8_t>(fminf(distance / MAX_LAB_DISTANCE * 255.0f, 255.0f));
 
-    sharedCurrent[threadIdx.y][threadIdx.x][0] = linePtr[x].r / 255.0f;
-    sharedCurrent[threadIdx.y][threadIdx.x][1] = linePtr[x].g / 255.0f;
-    sharedCurrent[threadIdx.y][threadIdx.x][2] = linePtr[x].b / 255.0f;
-
-    __syncthreads();
-
-    float rRef = sharedReference[threadIdx.y][threadIdx.x][0];
-    float gRef = sharedReference[threadIdx.y][threadIdx.x][1];
-    float bRef = sharedReference[threadIdx.y][threadIdx.x][2];
-
-    float r = sharedCurrent[threadIdx.y][threadIdx.x][0];
-    float g = sharedCurrent[threadIdx.y][threadIdx.x][1];
-    float b = sharedCurrent[threadIdx.y][threadIdx.x][2];
-
-    float XRef, YRef, ZRef;
-    rgbToXyz(rRef, gRef, bRef, XRef, YRef, ZRef);
-
-    float LRef, ARef, BRef;
-    xyzToLab(XRef, YRef, ZRef, LRef, ARef, BRef);
-
-    float X, Y, Z;
-    rgbToXyz(r, g, b, X, Y, Z);
-
-    float L, A, B;
-    xyzToLab(X, Y, Z, L, A, B);
-
-    float distance = sqrtf((L - LRef) * (L - LRef) + (A - ARef) * (A - ARef) + (B - BRef) * (B - BRef));
-
-    uint8_t distance8bit = static_cast<uint8_t>(fminf(distance / MAX_LAB_DISTANCE * 255.0f, 255.0f));
-
-    linePtr[x].r = distance8bit;
-    linePtr[x].g = distance8bit;
-    linePtr[x].b = distance8bit;
+  ((rgb*)(buffer + y * bpitch))[x] = {distance8bit, distance8bit, distance8bit};
 }
 
 //******************************************************
