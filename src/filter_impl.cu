@@ -25,6 +25,17 @@ void check(T err,
 
 __device__ bool hysteresis_has_changed;
 
+__global__ void resize_pixels(std::byte* in, size_t ipxsize, size_t ipitch, std::byte* out, size_t opxsize, size_t opitch, int width, int height){
+  int yy = blockIdx.y * blockDim.y + threadIdx.y;
+  int xx = blockIdx.x * blockDim.x + threadIdx.x;
+  if (xx < width && yy < height) {
+    size_t min_px_size = min(ipxsize, opxsize);
+    for (size_t i = 0; i < min_px_size; ++i) {
+      out[yy * opitch + xx * opxsize + i] = in[yy * ipitch + xx * ipxsize + i];
+    }
+  }
+}
+
 //******************************************************
 //**                                                  **
 //**               Background Estimation              **
@@ -251,9 +262,7 @@ __global__ void morphological_erosion(std::byte* buffer,
 
   if (xx >= width || yy >= height)
     return;
-  unsigned int min_red = 0xff;
-  unsigned int min_green = 0xff;
-  unsigned int min_blue = 0xff;
+  unsigned int res = 0xffffffff;
 
   // Compute the minimum value in the 5x5 neighborhood
   for (int j = yy - 2; j <= yy + 2; j++)
@@ -262,14 +271,7 @@ __global__ void morphological_erosion(std::byte* buffer,
         {
           if (i >= 0 && i < width && j >= 0 && j < height)
             {
-              min_red =
-                min(min_red, (unsigned int)buffer[j * bpitch + i * N_CHANNELS]);
-              min_green =
-                min(min_green,
-                    (unsigned int)buffer[j * bpitch + i * N_CHANNELS + 1]);
-              min_blue =
-                min(min_blue,
-                    (unsigned int)buffer[j * bpitch + i * N_CHANNELS + 2]);
+              res = __vminu4(res, *((unsigned int *) &buffer[j * bpitch + i * N_CHANNELS]));
             }
         }
     }
@@ -277,37 +279,22 @@ __global__ void morphological_erosion(std::byte* buffer,
   // Compute the minimum value in the extremities
   if (xx - 3 >= 0)
     {
-      int i = yy * bpitch + (xx - 3) * N_CHANNELS;
-      min_red = min(min_red, (unsigned int)buffer[i]);
-      min_green = min(min_green, (unsigned int)buffer[i + 1]);
-      min_blue = min(min_blue, (unsigned int)buffer[i + 2]);
+      res = __vminu4(res, *((unsigned int *) &buffer[yy * bpitch + (xx - 3) * N_CHANNELS]));
     }
   if (xx + 3 < width)
     {
-      int i = yy * bpitch + (xx + 3) * N_CHANNELS;
-      min_red = min(min_red, (unsigned int)buffer[i]);
-      min_green = min(min_green, (unsigned int)buffer[i + 1]);
-      min_blue = min(min_blue, (unsigned int)buffer[i + 2]);
+      res = __vminu4(res, *((unsigned int *) &buffer[yy * bpitch + (xx + 3) * N_CHANNELS]));
     }
   if (yy - 3 >= 0)
     {
-      int i = (yy - 3) * bpitch + xx * N_CHANNELS;
-      min_red = min(min_red, (unsigned int)buffer[i]);
-      min_green = min(min_green, (unsigned int)buffer[i + 1]);
-      min_blue = min(min_blue, (unsigned int)buffer[i + 2]);
+      res = __vminu4(res, *((unsigned int *) &buffer[(yy - 3) * bpitch + xx * N_CHANNELS]));
     }
   if (yy + 3 < height)
     {
-      int i = (yy + 3) * bpitch + xx * N_CHANNELS;
-      min_red = min(min_red, (unsigned int)buffer[i]);
-      min_green = min(min_green, (unsigned int)buffer[i + 1]);
-      min_blue = min(min_blue, (unsigned int)buffer[i + 2]);
+      res = __vminu4(res, *((unsigned int *) &buffer[(yy + 3) * bpitch + xx * N_CHANNELS]));
     }
 
-  int out_index = yy * opitch + xx * N_CHANNELS;
-  output_buffer[out_index] = (std::byte)min_red;
-  output_buffer[out_index + 1] = (std::byte)min_green;
-  output_buffer[out_index + 2] = (std::byte)min_blue;
+  *((unsigned int *) &buffer[yy * opitch + xx * N_CHANNELS]) = res;
 }
 
 __global__ void morphological_dilation(std::byte* buffer,
@@ -322,64 +309,39 @@ __global__ void morphological_dilation(std::byte* buffer,
 
   if (xx >= width || yy >= height)
     return;
+  unsigned int res = 0x00000000;
 
-  unsigned int max_red = 0;
-  unsigned int max_green = 0;
-  unsigned int max_blue = 0;
-
-  // Compute the maximum value in the 5x5 neighborhood
+  // Compute the minimum value in the 5x5 neighborhood
   for (int j = yy - 2; j <= yy + 2; j++)
     {
       for (int i = xx - 2; i <= xx + 2; i++)
         {
           if (i >= 0 && i < width && j >= 0 && j < height)
             {
-              max_red =
-                max(max_red, (unsigned int)buffer[j * bpitch + i * N_CHANNELS]);
-              max_green =
-                max(max_green,
-                    (unsigned int)buffer[j * bpitch + i * N_CHANNELS + 1]);
-              max_blue =
-                max(max_blue,
-                    (unsigned int)buffer[j * bpitch + i * N_CHANNELS + 2]);
+              res = __vmaxu4(res, *((unsigned int *) &buffer[j * bpitch + i * N_CHANNELS]));
             }
         }
     }
 
-  // Compute the maximum value in the extremities
+  // Compute the minimum value in the extremities
   if (xx - 3 >= 0)
     {
-      int i = yy * bpitch + (xx - 3) * N_CHANNELS;
-      max_red = max(max_red, (unsigned int)buffer[i]);
-      max_green = max(max_green, (unsigned int)buffer[i + 1]);
-      max_blue = max(max_blue, (unsigned int)buffer[i + 2]);
+      res = __vmaxu4(res, *((unsigned int *) &buffer[yy * bpitch + (xx - 3) * N_CHANNELS]));
     }
   if (xx + 3 < width)
     {
-      int i = yy * bpitch + (xx + 3) * N_CHANNELS;
-      max_red = max(max_red, (unsigned int)buffer[i]);
-      max_green = max(max_green, (unsigned int)buffer[i + 1]);
-      max_blue = max(max_blue, (unsigned int)buffer[i + 2]);
+      res = __vmaxu4(res, *((unsigned int *) &buffer[yy * bpitch + (xx + 3) * N_CHANNELS]));
     }
   if (yy - 3 >= 0)
     {
-      int i = (yy - 3) * bpitch + xx * N_CHANNELS;
-      max_red = max(max_red, (unsigned int)buffer[i]);
-      max_green = max(max_green, (unsigned int)buffer[i + 1]);
-      max_blue = max(max_blue, (unsigned int)buffer[i + 2]);
+      res = __vmaxu4(res, *((unsigned int *) &buffer[(yy - 3) * bpitch + xx * N_CHANNELS]));
     }
   if (yy + 3 < height)
     {
-      int i = (yy + 3) * bpitch + xx * N_CHANNELS;
-      max_red = max(max_red, (unsigned int)buffer[i]);
-      max_green = max(max_green, (unsigned int)buffer[i + 1]);
-      max_blue = max(max_blue, (unsigned int)buffer[i + 2]);
+      res = __vmaxu4(res, *((unsigned int *) &buffer[(yy + 3) * bpitch + xx * N_CHANNELS]));
     }
 
-  int out_index = yy * opitch + xx * N_CHANNELS;
-  output_buffer[out_index] = (std::byte)max_red;
-  output_buffer[out_index + 1] = (std::byte)max_green;
-  output_buffer[out_index + 2] = (std::byte)max_blue;
+  *((unsigned int *) &buffer[yy * opitch + xx * N_CHANNELS]) = res;
 }
 
 //******************************************************
@@ -891,24 +853,40 @@ extern "C"
     int height = buffer_info->height;
     int src_stride = buffer_info->stride;
 
-    assert(N_CHANNELS == buffer_info->pixel_stride);
-    std::byte *dmask, *dbuffer;
-    size_t mpitch, bpitch;
+    std::byte *dmask, *dbuffer, *intermediate_buffer;
+    size_t mpitch, bpitch, ipitch;
 
     cudaError_t err;
 
     // Allocate memory on the device
+    err = cudaMallocPitch(&intermediate_buffer, &ipitch, width * buffer_info->pixel_stride, height);
+    CHECK_CUDA_ERROR(err);
     err = cudaMallocPitch(&dmask, &mpitch, width * N_CHANNELS, height);
     CHECK_CUDA_ERROR(err);
     err = cudaMallocPitch(&dbuffer, &bpitch, width * N_CHANNELS, height);
     CHECK_CUDA_ERROR(err);
 
     // Copy the input buffer to the device
-    err = cudaMemcpy2D(dmask, mpitch, src_buffer, src_stride,
-                       width * N_CHANNELS, height, cudaMemcpyDefault);
+    err = cudaMemcpy2D(intermediate_buffer, ipitch, src_buffer, src_stride, 
+                      width * buffer_info->pixel_stride, height, cudaMemcpyHostToDevice);
     CHECK_CUDA_ERROR(err);
-    err = cudaMemcpy2D(dbuffer, bpitch, src_buffer, src_stride,
-                       width * N_CHANNELS, height, cudaMemcpyDefault);
+
+    // Set thread block and grid dimensions
+    dim3 blockSize(BLOCK_SIZE, BLOCK_SIZE);
+    dim3 gridSize((width + blockSize.x - 1) / blockSize.x,
+                  (height + blockSize.y - 1) / blockSize.y);
+    
+    resize_pixels<<<gridSize, blockSize>>>(
+      intermediate_buffer, buffer_info->pixel_stride, ipitch,
+      dmask, N_CHANNELS, mpitch, width, height
+    );
+
+    resize_pixels<<<gridSize, blockSize>>>(
+      intermediate_buffer, buffer_info->pixel_stride, ipitch,
+      dbuffer, N_CHANNELS, bpitch, width, height
+    );
+
+    err = cudaDeviceSynchronize();
     CHECK_CUDA_ERROR(err);
 
     // Set first frame as bg model or set it to user provided bg
@@ -916,19 +894,21 @@ extern "C"
     static size_t bg_pitch = params->bg != nullptr ? 0 : bpitch;
 
     if (bg_buffer == nullptr && params->bg != nullptr)
-      {
-        err =
-          cudaMallocPitch(&bg_buffer, &bg_pitch, width * N_CHANNELS, height);
-        CHECK_CUDA_ERROR(err);
-        err = cudaMemcpy2D(bg_buffer, bg_pitch, params->bg, src_stride,
-                           width * N_CHANNELS, height, cudaMemcpyDefault);
-        CHECK_CUDA_ERROR(err);
-      }
+    {
+      err =
+        cudaMallocPitch(&bg_buffer, &bg_pitch, width * N_CHANNELS, height);
+      CHECK_CUDA_ERROR(err);
+      err = cudaMemcpy2D(intermediate_buffer, ipitch, params->bg, src_stride,
+                         width * buffer_info->pixel_stride, height, cudaMemcpyDefault);
+      CHECK_CUDA_ERROR(err);
+      resize_pixels<<<gridSize, blockSize>>>(
+        intermediate_buffer, buffer_info->pixel_stride, ipitch,
+        bg_buffer, N_CHANNELS, bg_pitch, width, height
+      );
 
-    // Set thread block and grid dimensions
-    dim3 blockSize(BLOCK_SIZE, BLOCK_SIZE);
-    dim3 gridSize((width + blockSize.x - 1) / blockSize.x,
-                  (height + blockSize.y - 1) / blockSize.y);
+      err = cudaDeviceSynchronize();
+      CHECK_CUDA_ERROR(err);
+    }
 
     // Convert RGB to LAB
     rgb_to_lab_cuda(bg_buffer, bg_pitch, dmask, mpitch, buffer_info);
@@ -953,9 +933,19 @@ extern "C"
                         buffer_info, params, true);
       }
 
+
+    resize_pixels<<<gridSize, blockSize>>>(
+      dbuffer, N_CHANNELS, bpitch,
+      intermediate_buffer, buffer_info->pixel_stride, ipitch, width, height
+    );
+
+    err = cudaDeviceSynchronize();
+    CHECK_CUDA_ERROR(err);
+    
+
     // Copy the result back to the host
-    err = cudaMemcpy2D(src_buffer, src_stride, dbuffer, bpitch,
-                       width * N_CHANNELS, height, cudaMemcpyDefault);
+    err = cudaMemcpy2D(src_buffer, src_stride, intermediate_buffer, ipitch,
+                       width * buffer_info->pixel_stride, height, cudaMemcpyDeviceToHost);
     CHECK_CUDA_ERROR(err);
 
     cudaFree(dmask);
