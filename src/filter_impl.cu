@@ -871,20 +871,6 @@ extern "C"
                       width * buffer_info->pixel_stride, height, cudaMemcpyHostToDevice);
     CHECK_CUDA_ERROR(err);
 
-    // Set first frame as bg model or set it to user provided bg
-    static std::byte* bg_buffer = params->bg != nullptr ? nullptr : dbuffer;
-    static size_t bg_pitch = params->bg != nullptr ? 0 : bpitch;
-
-    if (bg_buffer == nullptr && params->bg != nullptr)
-      {
-        err =
-          cudaMallocPitch(&bg_buffer, &bg_pitch, width * N_CHANNELS, height);
-        CHECK_CUDA_ERROR(err);
-        err = cudaMemcpy2D(bg_buffer, bg_pitch, params->bg, src_stride,
-                           width * N_CHANNELS, height, cudaMemcpyDefault);
-        CHECK_CUDA_ERROR(err);
-      }
-
     // Set thread block and grid dimensions
     dim3 blockSize(BLOCK_SIZE, BLOCK_SIZE);
     dim3 gridSize((width + blockSize.x - 1) / blockSize.x,
@@ -902,6 +888,27 @@ extern "C"
 
     err = cudaDeviceSynchronize();
     CHECK_CUDA_ERROR(err);
+
+    // Set first frame as bg model or set it to user provided bg
+    static std::byte* bg_buffer = params->bg != nullptr ? nullptr : dbuffer;
+    static size_t bg_pitch = params->bg != nullptr ? 0 : bpitch;
+
+    if (bg_buffer == nullptr && params->bg != nullptr)
+    {
+      err =
+        cudaMallocPitch(&bg_buffer, &bg_pitch, width * N_CHANNELS, height);
+      CHECK_CUDA_ERROR(err);
+      err = cudaMemcpy2D(intermediate_buffer, ipitch, params->bg, src_stride,
+                         width * buffer_info->pixel_stride, height, cudaMemcpyDefault);
+      CHECK_CUDA_ERROR(err);
+      resize_pixels<<<gridSize, blockSize>>>(
+        intermediate_buffer, buffer_info->pixel_stride, ipitch,
+        bg_buffer, N_CHANNELS, bg_pitch, width, height
+      );
+
+      err = cudaDeviceSynchronize();
+      CHECK_CUDA_ERROR(err);
+    }
 
     // Convert RGB to LAB
     rgb_to_lab_cuda(bg_buffer, bg_pitch, dmask, mpitch, buffer_info);
