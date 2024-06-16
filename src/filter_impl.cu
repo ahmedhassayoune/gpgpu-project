@@ -663,7 +663,7 @@ namespace
       {
         hysteresis_opti<<<gridSize, blockSize>>>(*buffer, *bpitch, marker,
                                                  mpitch, width, height, low_th,
-                                                 i == HYSTERESIS_ITER - 1);
+                                                 i == (HYSTERESIS_ITER - 1));
         err = cudaDeviceSynchronize();
         CHECK_CUDA_ERROR(err);
       }
