@@ -24,6 +24,28 @@ void check(T err,
     }
 }
 
+__global__ void resize_pixels(std::byte* in,
+                              size_t ipxsize,
+                              size_t ipitch,
+                              std::byte* out,
+                              size_t opxsize,
+                              size_t opitch,
+                              int width,
+                              int height)
+{
+  int yy = blockIdx.y * blockDim.y + threadIdx.y;
+  int xx = blockIdx.x * blockDim.x + threadIdx.x;
+  if (xx < width && yy < height)
+    {
+      size_t min_px_size = min(ipxsize, opxsize);
+      for (size_t i = 0; i < min_px_size; ++i)
+        {
+          out[yy * opitch + xx * opxsize + i] =
+            in[yy * ipitch + xx * ipxsize + i];
+        }
+    }
+}
+
 //******************************************************
 //**                                                  **
 //**               Background Estimation              **
@@ -83,7 +105,9 @@ __device__ void _insertion_sort(std::byte* arr, int start, int end, int step)
 
 __global__ void estimate_background_median(_BE_FSIGN)
 {
-#define _BACKGROUND_ESTIMATION_MEDIAN_SPST // single position single thread
+#define _BACKGROUND_ESTIMATION_MEDIAN_ISORT
+  // #define _BACKGROUND_ESTIMATION_MEDIAN_LOCAL_HIST
+  // #define _BACKGROUND_ESTIMATION_MEDIAN_SHARED_HIST
 
   int yy = blockIdx.y * blockDim.y + threadIdx.y;
   int xx = blockIdx.x * blockDim.x + threadIdx.x;
@@ -93,7 +117,7 @@ __global__ void estimate_background_median(_BE_FSIGN)
 
   constexpr size_t PIXEL_STRIDE = N_CHANNELS;
 
-#ifdef _BACKGROUND_ESTIMATION_MEDIAN_SPST
+#ifdef _BACKGROUND_ESTIMATION_MEDIAN_ISORT
   // 3 channels, at most 42 buffers
   // 4 channels, at most 32 buffers
   std::byte B[128];
@@ -118,9 +142,69 @@ __global__ void estimate_background_median(_BE_FSIGN)
   for (int ii = 0; ii < N_CHANNELS; ++ii)
     ptr[ii] = B[(buffers_amount / 2) * N_CHANNELS + ii];
 #else
+#  ifdef _BACKGROUND_ESTIMATION_MEDIAN_LOCAL_HIST
+  // a histogram per channel
+  uint8_t H[N_CHANNELS * 256] = {0};
+
+  // for each buffer, for each channel, compute histogram
+  for (int ii = 0; ii < buffers_amount; ++ii)
+    {
+      uint8_t* ptr =
+        (uint8_t*)buffers[ii] + yy * bpitches[ii] + xx * PIXEL_STRIDE;
+      for (int jj = 0; jj < N_CHANNELS; ++jj)
+        ++H[jj * 256 + ptr[jj]];
+    }
+
+  // for each histogram, compute cumulative sum
+  uint8_t* outptr = (uint8_t*)out + yy * opitch + xx * PIXEL_STRIDE;
+  for (int ii = 0; ii < N_CHANNELS; ++ii)
+    {
+      uint8_t cumsum = 0;
+      int jj = 0;
+      for (; jj < 256 && cumsum < buffers_amount / 2 + 1; ++jj)
+        cumsum += H[ii * 256 + jj];
+      outptr[ii] = (uint8_t)(jj - 1);
+    }
+#  else
+#    ifdef _BACKGROUND_ESTIMATION_MEDIAN_SHARED_HIST
+  // each thread has `N_CHANNELS` histograms
+  extern __shared__ uint8_t H[];
+
+  constexpr size_t THREAD_STRIDE = 256 * N_CHANNELS;
+  size_t offset =
+    ((yy % blockDim.y) * blockDim.x + (xx % blockDim.x)) * THREAD_STRIDE;
+
+  // clean histograms
+  for (size_t ii = 0; ii < THREAD_STRIDE; ++ii)
+    H[offset + ii] = 0x00;
+
+  // for each buffer, compute histogram
+  for (int ii = 0; ii < buffers_amount; ++ii)
+    {
+      uint8_t* ptr =
+        (uint8_t*)buffers[ii] + yy * bpitches[ii] + xx * PIXEL_STRIDE;
+      for (int jj = 0; jj < N_CHANNELS; ++jj)
+        ++H[offset + jj * 256 + ptr[jj]];
+    }
+
+  // for each histogram, compute cumulative sum
+  uint8_t* outptr = (uint8_t*)out + yy * opitch + xx * PIXEL_STRIDE;
+  for (int ii = 0; ii < N_CHANNELS; ++ii)
+    {
+      uint8_t cumsum = 0;
+      int jj = 0;
+      for (; jj < 256 && cumsum < buffers_amount / 2 + 1; ++jj)
+        cumsum += H[offset + ii * 256 + jj];
+      outptr[ii] = (uint8_t)(jj - 1);
+    }
+#    else
+#    endif
+#  endif
 #endif
 
-#undef _BACKGROUND_ESTIMATION_MEDIAN_SPST
+  // #undef _BACKGROUND_ESTIMATION_MEDIAN_ISORT
+  // #undef _BACKGROUND_ESTIMATION_MEDIAN_LOCAL_HIST
+  // #undef _BACKGROUND_ESTIMATION_MEDIAN_SHARED_HIST
 }
 
 #undef _BE_FSIGN
@@ -131,53 +215,46 @@ __global__ void estimate_background_median(_BE_FSIGN)
 //**                                                  **
 //******************************************************
 
-__device__ void
-rgbToXyz(float r, float g, float b, float& x, float& y, float& z)
-{
-  const float D65_XYZ[9] = {0.412453f, 0.357580f, 0.180423f,
-                            0.212671f, 0.715160f, 0.072169f,
-                            0.019334f, 0.119193f, 0.950227f};
+// Declare all constant variable outsite the kernel for better access time
+__constant__ float D65_XYZ[9] = {0.412453f, 0.357580f, 0.180423f,
+                                 0.212671f, 0.715160f, 0.072169f,
+                                 0.019334f, 0.119193f, 0.950227f};
 
+__constant__ float D65_XN = 0.95047f;
+__constant__ float D65_YN = 1.00000f;
+__constant__ float D65_ZN = 1.08883f;
+
+__constant__ float EPSILON = 0.008856f;
+__constant__ float KAPPA = 903.3f;
+
+__device__ void
+rgbToLab(float r, float g, float b, float& l_, float& a_, float& b_)
+{
   r = r / 255.0f;
   g = g / 255.0f;
   b = b / 255.0f;
 
 #define GAMMA_CORRECT(C)                                                       \
-  ((C) > 0.04045f ? powf(((C) + 0.055f) / 1.055f, 2.4f) : (C) / 12.92f)
+  ((C) > 0.04045f ? __powf(((C) + 0.055f) / 1.055f, 2.4f) : (C) / 12.92f)
   r = GAMMA_CORRECT(r);
   g = GAMMA_CORRECT(g);
   b = GAMMA_CORRECT(b);
 #undef GAMMA_CORRECT
 
-  x = r * D65_XYZ[0] + g * D65_XYZ[1] + b * D65_XYZ[2];
-  y = r * D65_XYZ[3] + g * D65_XYZ[4] + b * D65_XYZ[5];
-  z = r * D65_XYZ[6] + g * D65_XYZ[7] + b * D65_XYZ[8];
-}
-
-__device__ void
-xyzToLab(float x, float y, float z, float& l, float& a, float& b)
-{
-  const float D65_Xn = 0.95047f;
-  const float D65_Yn = 1.00000f;
-  const float D65_Zn = 1.08883f;
-
-  x /= D65_Xn;
-  y /= D65_Yn;
-  z /= D65_Zn;
-
-  const float epsilon = 0.008856f;
-  const float kappa = 903.3f;
+  r = (r * D65_XYZ[0] + g * D65_XYZ[1] + b * D65_XYZ[2]) / D65_XN;
+  g = (r * D65_XYZ[3] + g * D65_XYZ[4] + b * D65_XYZ[5]) / D65_YN;
+  b = (r * D65_XYZ[6] + g * D65_XYZ[7] + b * D65_XYZ[8]) / D65_ZN;
 
 #define NONLINEAR(C)                                                           \
-  ((C) > epsilon ? powf((C), 1.0f / 3.0f) : ((kappa * (C) + 16.0f) / 116.0f))
-  float fx = NONLINEAR(x);
-  float fy = NONLINEAR(y);
-  float fz = NONLINEAR(z);
+  ((C) > EPSILON ? __powf((C), 1.0f / 3.0f) : ((KAPPA * (C) + 16.0f) / 116.0f))
+  float fx = NONLINEAR(r);
+  float fy = NONLINEAR(g);
+  float fz = NONLINEAR(b);
 #undef NONLINEAR
 
-  l = (116.0f * fy) - 16.0f;
-  a = 500.0f * (fx - fy);
-  b = 200.0f * (fy - fz);
+  l_ = (116.0f * fy) - 16.0f;
+  a_ = 500.0f * (fx - fy);
+  b_ = 200.0f * (fy - fz);
 }
 
 __global__ void rgbToLabDistanceKernel(std::byte* referenceBuffer,
@@ -193,43 +270,20 @@ __global__ void rgbToLabDistanceKernel(std::byte* referenceBuffer,
   if (x >= width || y >= height)
     return;
 
-  rgb* lineptrReference = (rgb*)(referenceBuffer + y * rpitch);
-  float rRef = lineptrReference[x].r;
-  float gRef = lineptrReference[x].g;
-  float bRef = lineptrReference[x].b;
-
-  float XRef, YRef, ZRef;
-  rgbToXyz(rRef, gRef, bRef, XRef, YRef, ZRef);
-
   float LRef, ARef, BRef;
-  xyzToLab(XRef, YRef, ZRef, LRef, ARef, BRef);
-
-  LAB referenceLab = {LRef, ARef, BRef};
-
-  rgb* lineptr = (rgb*)(buffer + y * bpitch);
-  float r = lineptr[x].r;
-  float g = lineptr[x].g;
-  float b = lineptr[x].b;
-
-  float X, Y, Z;
-  rgbToXyz(r, g, b, X, Y, Z);
+  rgb ref_pixel = ((rgb*)(referenceBuffer + y * rpitch))[x];
+  rgbToLab(ref_pixel.r, ref_pixel.g, ref_pixel.b, LRef, ARef, BRef);
 
   float L, A, B;
-  xyzToLab(X, Y, Z, L, A, B);
+  rgb buf_pixel = ((rgb*)(buffer + y * bpitch))[x];
+  rgbToLab(buf_pixel.r, buf_pixel.g, buf_pixel.b, L, A, B);
 
-  LAB currentLab = {L, A, B};
-#define LAB_DISTANCE(lab1, lab2)                                               \
-  (sqrtf(powf((lab1).l - (lab2).l, 2) + powf((lab1).a - (lab2).a, 2)           \
-         + powf((lab1).b - (lab2).b, 2)))
-  float distance = LAB_DISTANCE(currentLab, referenceLab);
-#undef LAB_DISTANCE
-
+  float distance = sqrtf((L - LRef) * (L - LRef) + (A - ARef) * (A - ARef)
+                         + (B - BRef) * (B - BRef));
   uint8_t distance8bit =
     static_cast<uint8_t>(fminf(distance / MAX_LAB_DISTANCE * 255.0f, 255.0f));
 
-  lineptr[x].r = distance8bit;
-  lineptr[x].g = distance8bit;
-  lineptr[x].b = distance8bit;
+  ((rgb*)(buffer + y * bpitch))[x] = {distance8bit, distance8bit, distance8bit};
 }
 
 //******************************************************
@@ -250,9 +304,7 @@ __global__ void morphological_erosion(std::byte* buffer,
 
   if (xx >= width || yy >= height)
     return;
-  unsigned int min_red = 0xff;
-  unsigned int min_green = 0xff;
-  unsigned int min_blue = 0xff;
+  unsigned int res = 0xffffffff;
 
   // Compute the minimum value in the 5x5 neighborhood
   for (int j = yy - 2; j <= yy + 2; j++)
@@ -261,14 +313,8 @@ __global__ void morphological_erosion(std::byte* buffer,
         {
           if (i >= 0 && i < width && j >= 0 && j < height)
             {
-              min_red =
-                min(min_red, (unsigned int)buffer[j * bpitch + i * N_CHANNELS]);
-              min_green =
-                min(min_green,
-                    (unsigned int)buffer[j * bpitch + i * N_CHANNELS + 1]);
-              min_blue =
-                min(min_blue,
-                    (unsigned int)buffer[j * bpitch + i * N_CHANNELS + 2]);
+              res = __vminu4(
+                res, *((unsigned int*)&buffer[j * bpitch + i * N_CHANNELS]));
             }
         }
     }
@@ -276,37 +322,26 @@ __global__ void morphological_erosion(std::byte* buffer,
   // Compute the minimum value in the extremities
   if (xx - 3 >= 0)
     {
-      int i = yy * bpitch + (xx - 3) * N_CHANNELS;
-      min_red = min(min_red, (unsigned int)buffer[i]);
-      min_green = min(min_green, (unsigned int)buffer[i + 1]);
-      min_blue = min(min_blue, (unsigned int)buffer[i + 2]);
+      res = __vminu4(
+        res, *((unsigned int*)&buffer[yy * bpitch + (xx - 3) * N_CHANNELS]));
     }
   if (xx + 3 < width)
     {
-      int i = yy * bpitch + (xx + 3) * N_CHANNELS;
-      min_red = min(min_red, (unsigned int)buffer[i]);
-      min_green = min(min_green, (unsigned int)buffer[i + 1]);
-      min_blue = min(min_blue, (unsigned int)buffer[i + 2]);
+      res = __vminu4(
+        res, *((unsigned int*)&buffer[yy * bpitch + (xx + 3) * N_CHANNELS]));
     }
   if (yy - 3 >= 0)
     {
-      int i = (yy - 3) * bpitch + xx * N_CHANNELS;
-      min_red = min(min_red, (unsigned int)buffer[i]);
-      min_green = min(min_green, (unsigned int)buffer[i + 1]);
-      min_blue = min(min_blue, (unsigned int)buffer[i + 2]);
+      res = __vminu4(
+        res, *((unsigned int*)&buffer[(yy - 3) * bpitch + xx * N_CHANNELS]));
     }
   if (yy + 3 < height)
     {
-      int i = (yy + 3) * bpitch + xx * N_CHANNELS;
-      min_red = min(min_red, (unsigned int)buffer[i]);
-      min_green = min(min_green, (unsigned int)buffer[i + 1]);
-      min_blue = min(min_blue, (unsigned int)buffer[i + 2]);
+      res = __vminu4(
+        res, *((unsigned int*)&buffer[(yy + 3) * bpitch + xx * N_CHANNELS]));
     }
 
-  int out_index = yy * opitch + xx * N_CHANNELS;
-  output_buffer[out_index] = (std::byte)min_red;
-  output_buffer[out_index + 1] = (std::byte)min_green;
-  output_buffer[out_index + 2] = (std::byte)min_blue;
+  *((unsigned int*)&buffer[yy * opitch + xx * N_CHANNELS]) = res;
 }
 
 __global__ void morphological_dilation(std::byte* buffer,
@@ -321,64 +356,44 @@ __global__ void morphological_dilation(std::byte* buffer,
 
   if (xx >= width || yy >= height)
     return;
+  unsigned int res = 0x00000000;
 
-  unsigned int max_red = 0;
-  unsigned int max_green = 0;
-  unsigned int max_blue = 0;
-
-  // Compute the maximum value in the 5x5 neighborhood
+  // Compute the minimum value in the 5x5 neighborhood
   for (int j = yy - 2; j <= yy + 2; j++)
     {
       for (int i = xx - 2; i <= xx + 2; i++)
         {
           if (i >= 0 && i < width && j >= 0 && j < height)
             {
-              max_red =
-                max(max_red, (unsigned int)buffer[j * bpitch + i * N_CHANNELS]);
-              max_green =
-                max(max_green,
-                    (unsigned int)buffer[j * bpitch + i * N_CHANNELS + 1]);
-              max_blue =
-                max(max_blue,
-                    (unsigned int)buffer[j * bpitch + i * N_CHANNELS + 2]);
+              res = __vmaxu4(
+                res, *((unsigned int*)&buffer[j * bpitch + i * N_CHANNELS]));
             }
         }
     }
 
-  // Compute the maximum value in the extremities
+  // Compute the minimum value in the extremities
   if (xx - 3 >= 0)
     {
-      int i = yy * bpitch + (xx - 3) * N_CHANNELS;
-      max_red = max(max_red, (unsigned int)buffer[i]);
-      max_green = max(max_green, (unsigned int)buffer[i + 1]);
-      max_blue = max(max_blue, (unsigned int)buffer[i + 2]);
+      res = __vmaxu4(
+        res, *((unsigned int*)&buffer[yy * bpitch + (xx - 3) * N_CHANNELS]));
     }
   if (xx + 3 < width)
     {
-      int i = yy * bpitch + (xx + 3) * N_CHANNELS;
-      max_red = max(max_red, (unsigned int)buffer[i]);
-      max_green = max(max_green, (unsigned int)buffer[i + 1]);
-      max_blue = max(max_blue, (unsigned int)buffer[i + 2]);
+      res = __vmaxu4(
+        res, *((unsigned int*)&buffer[yy * bpitch + (xx + 3) * N_CHANNELS]));
     }
   if (yy - 3 >= 0)
     {
-      int i = (yy - 3) * bpitch + xx * N_CHANNELS;
-      max_red = max(max_red, (unsigned int)buffer[i]);
-      max_green = max(max_green, (unsigned int)buffer[i + 1]);
-      max_blue = max(max_blue, (unsigned int)buffer[i + 2]);
+      res = __vmaxu4(
+        res, *((unsigned int*)&buffer[(yy - 3) * bpitch + xx * N_CHANNELS]));
     }
   if (yy + 3 < height)
     {
-      int i = (yy + 3) * bpitch + xx * N_CHANNELS;
-      max_red = max(max_red, (unsigned int)buffer[i]);
-      max_green = max(max_green, (unsigned int)buffer[i + 1]);
-      max_blue = max(max_blue, (unsigned int)buffer[i + 2]);
+      res = __vmaxu4(
+        res, *((unsigned int*)&buffer[(yy + 3) * bpitch + xx * N_CHANNELS]));
     }
 
-  int out_index = yy * opitch + xx * N_CHANNELS;
-  output_buffer[out_index] = (std::byte)max_red;
-  output_buffer[out_index + 1] = (std::byte)max_green;
-  output_buffer[out_index + 2] = (std::byte)max_blue;
+  *((unsigned int*)&buffer[yy * opitch + xx * N_CHANNELS]) = res;
 }
 
 //******************************************************
@@ -817,15 +832,33 @@ namespace
         CHECK_CUDA_ERROR(err);
       }
 
-    dim3 blockSize(BLOCK_SIZE, BLOCK_SIZE);
+    size_t _BE_BLOCK_SIZE = BLOCK_SIZE;
+#ifdef _BACKGROUND_ESTIMATION_MEDIAN_SHARED_HIST
+    _BE_BLOCK_SIZE = is_median ? (N_CHANNELS > 3 ? 6 : 8) : BLOCK_SIZE;
+#endif
+    dim3 blockSize(_BE_BLOCK_SIZE, _BE_BLOCK_SIZE);
     dim3 gridSize((width + (blockSize.x - 1)) / blockSize.x,
                   (height + (blockSize.y - 1)) / blockSize.y);
 
 // Estimate background
 #define _BE_FPARAMS                                                            \
   dbuffer_samples, pitches, dbuffers_amount, *bg_model, *bg_pitch, width, height
-    is_median ? estimate_background_median<<<gridSize, blockSize>>>(_BE_FPARAMS)
-              : estimate_background_mean<<<gridSize, blockSize>>>(_BE_FPARAMS);
+
+    if (is_median)
+      {
+#ifdef _BACKGROUND_ESTIMATION_MEDIAN_SHARED_HIST
+#  define _SHARED_MEM_SIZE                                                     \
+    _BE_BLOCK_SIZE* _BE_BLOCK_SIZE* N_CHANNELS * 256 * sizeof(uint8_t)
+        estimate_background_median<<<gridSize, blockSize, _SHARED_MEM_SIZE>>>(
+          _BE_FPARAMS);
+#  undef _SHARED_MEM_SIZE
+#else
+        estimate_background_median<<<gridSize, blockSize>>>(_BE_FPARAMS);
+#endif
+      }
+    else
+      estimate_background_mean<<<gridSize, blockSize>>>(_BE_FPARAMS);
+
 #undef _BE_FPARAMS
 
     cudaError_t err = cudaDeviceSynchronize();
@@ -843,24 +876,40 @@ extern "C"
     int height = buffer_info->height;
     int src_stride = buffer_info->stride;
 
-    assert(N_CHANNELS == buffer_info->pixel_stride);
-    std::byte *dmask, *dbuffer;
-    size_t mpitch, bpitch;
+    std::byte *dmask, *dbuffer, *intermediate_buffer;
+    size_t mpitch, bpitch, ipitch;
 
     cudaError_t err;
 
     // Allocate memory on the device
+    err = cudaMallocPitch(&intermediate_buffer, &ipitch,
+                          width * buffer_info->pixel_stride, height);
+    CHECK_CUDA_ERROR(err);
     err = cudaMallocPitch(&dmask, &mpitch, width * N_CHANNELS, height);
     CHECK_CUDA_ERROR(err);
     err = cudaMallocPitch(&dbuffer, &bpitch, width * N_CHANNELS, height);
     CHECK_CUDA_ERROR(err);
 
     // Copy the input buffer to the device
-    err = cudaMemcpy2D(dmask, mpitch, src_buffer, src_stride,
-                       width * N_CHANNELS, height, cudaMemcpyDefault);
+    err = cudaMemcpy2D(intermediate_buffer, ipitch, src_buffer, src_stride,
+                       width * buffer_info->pixel_stride, height,
+                       cudaMemcpyHostToDevice);
     CHECK_CUDA_ERROR(err);
-    err = cudaMemcpy2D(dbuffer, bpitch, src_buffer, src_stride,
-                       width * N_CHANNELS, height, cudaMemcpyDefault);
+
+    // Set thread block and grid dimensions
+    dim3 blockSize(BLOCK_SIZE, BLOCK_SIZE);
+    dim3 gridSize((width + blockSize.x - 1) / blockSize.x,
+                  (height + blockSize.y - 1) / blockSize.y);
+
+    resize_pixels<<<gridSize, blockSize>>>(
+      intermediate_buffer, buffer_info->pixel_stride, ipitch, dmask, N_CHANNELS,
+      mpitch, width, height);
+
+    resize_pixels<<<gridSize, blockSize>>>(
+      intermediate_buffer, buffer_info->pixel_stride, ipitch, dbuffer,
+      N_CHANNELS, bpitch, width, height);
+
+    err = cudaDeviceSynchronize();
     CHECK_CUDA_ERROR(err);
 
     // Set first frame as bg model or set it to user provided bg
@@ -872,15 +921,17 @@ extern "C"
         err =
           cudaMallocPitch(&bg_buffer, &bg_pitch, width * N_CHANNELS, height);
         CHECK_CUDA_ERROR(err);
-        err = cudaMemcpy2D(bg_buffer, bg_pitch, params->bg, src_stride,
-                           width * N_CHANNELS, height, cudaMemcpyDefault);
+        err = cudaMemcpy2D(intermediate_buffer, ipitch, params->bg, src_stride,
+                           width * buffer_info->pixel_stride, height,
+                           cudaMemcpyDefault);
+        CHECK_CUDA_ERROR(err);
+        resize_pixels<<<gridSize, blockSize>>>(
+          intermediate_buffer, buffer_info->pixel_stride, ipitch, bg_buffer,
+          N_CHANNELS, bg_pitch, width, height);
+
+        err = cudaDeviceSynchronize();
         CHECK_CUDA_ERROR(err);
       }
-
-    // Set thread block and grid dimensions
-    dim3 blockSize(BLOCK_SIZE, BLOCK_SIZE);
-    dim3 gridSize((width + blockSize.x - 1) / blockSize.x,
-                  (height + blockSize.y - 1) / blockSize.y);
 
     // Convert RGB to LAB
     rgb_to_lab_cuda(bg_buffer, bg_pitch, dmask, mpitch, buffer_info);
@@ -905,11 +956,20 @@ extern "C"
                         buffer_info, params, true);
       }
 
-    // Copy the result back to the host
-    err = cudaMemcpy2D(src_buffer, src_stride, dbuffer, bpitch,
-                       width * N_CHANNELS, height, cudaMemcpyDefault);
+    resize_pixels<<<gridSize, blockSize>>>(
+      dbuffer, N_CHANNELS, bpitch, intermediate_buffer,
+      buffer_info->pixel_stride, ipitch, width, height);
+
+    err = cudaDeviceSynchronize();
     CHECK_CUDA_ERROR(err);
 
+    // Copy the result back to the host
+    err = cudaMemcpy2D(src_buffer, src_stride, intermediate_buffer, ipitch,
+                       width * buffer_info->pixel_stride, height,
+                       cudaMemcpyDeviceToHost);
+    CHECK_CUDA_ERROR(err);
+
+    cudaFree(intermediate_buffer);
     cudaFree(dmask);
     cudaFree(dbuffer);
   }
