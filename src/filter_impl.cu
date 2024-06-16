@@ -154,53 +154,48 @@ __global__ void estimate_background_median(_BE_FSIGN)
 //**                                                  **
 //******************************************************
 
-__device__ void
-rgbToXyz(float r, float g, float b, float& x, float& y, float& z)
-{
-  const float D65_XYZ[9] = {0.412453f, 0.357580f, 0.180423f,
+// Declare all constant variable outsite the kernel for better access time
+__constant__ float D65_XYZ[9] = {0.412453f, 0.357580f, 0.180423f,
                             0.212671f, 0.715160f, 0.072169f,
                             0.019334f, 0.119193f, 0.950227f};
+
+__constant__ float D65_XN = 0.95047f;
+__constant__ float D65_YN = 1.00000f;
+__constant__ float D65_ZN = 1.08883f;
+
+__constant__ float EPSILON = 0.008856f;
+__constant__ float KAPPA = 903.3f;
+
+                            
+__device__ void
+rgbToLab(float r, float g, float b, float& l_, float& a_, float& b_)
+{
 
   r = r / 255.0f;
   g = g / 255.0f;
   b = b / 255.0f;
 
 #define GAMMA_CORRECT(C)                                                       \
-  ((C) > 0.04045f ? powf(((C) + 0.055f) / 1.055f, 2.4f) : (C) / 12.92f)
+  ((C) > 0.04045f ? __powf(((C) + 0.055f) / 1.055f, 2.4f) : (C) / 12.92f)
   r = GAMMA_CORRECT(r);
   g = GAMMA_CORRECT(g);
   b = GAMMA_CORRECT(b);
 #undef GAMMA_CORRECT
 
-  x = r * D65_XYZ[0] + g * D65_XYZ[1] + b * D65_XYZ[2];
-  y = r * D65_XYZ[3] + g * D65_XYZ[4] + b * D65_XYZ[5];
-  z = r * D65_XYZ[6] + g * D65_XYZ[7] + b * D65_XYZ[8];
-}
-
-__device__ void
-xyzToLab(float x, float y, float z, float& l, float& a, float& b)
-{
-  const float D65_Xn = 0.95047f;
-  const float D65_Yn = 1.00000f;
-  const float D65_Zn = 1.08883f;
-
-  x /= D65_Xn;
-  y /= D65_Yn;
-  z /= D65_Zn;
-
-  const float epsilon = 0.008856f;
-  const float kappa = 903.3f;
+  r = (r * D65_XYZ[0] + g * D65_XYZ[1] + b * D65_XYZ[2]) / D65_XN;
+  g = (r * D65_XYZ[3] + g * D65_XYZ[4] + b * D65_XYZ[5]) / D65_YN;
+  b = (r * D65_XYZ[6] + g * D65_XYZ[7] + b * D65_XYZ[8]) / D65_ZN;
 
 #define NONLINEAR(C)                                                           \
-  ((C) > epsilon ? powf((C), 1.0f / 3.0f) : ((kappa * (C) + 16.0f) / 116.0f))
-  float fx = NONLINEAR(x);
-  float fy = NONLINEAR(y);
-  float fz = NONLINEAR(z);
+  ((C) > EPSILON ? __powf((C), 1.0f / 3.0f) : ((KAPPA * (C) + 16.0f) / 116.0f))
+  float fx = NONLINEAR(r);
+  float fy = NONLINEAR(g);
+  float fz = NONLINEAR(b);
 #undef NONLINEAR
 
-  l = (116.0f * fy) - 16.0f;
-  a = 500.0f * (fx - fy);
-  b = 200.0f * (fy - fz);
+  l_ = (116.0f * fy) - 16.0f;
+  a_ = 500.0f * (fx - fy);
+  b_ = 200.0f * (fy - fz);
 }
 
 __global__ void rgbToLabDistanceKernel(std::byte* referenceBuffer,
@@ -216,43 +211,19 @@ __global__ void rgbToLabDistanceKernel(std::byte* referenceBuffer,
   if (x >= width || y >= height)
     return;
 
-  rgb* lineptrReference = (rgb*)(referenceBuffer + y * rpitch);
-  float rRef = lineptrReference[x].r;
-  float gRef = lineptrReference[x].g;
-  float bRef = lineptrReference[x].b;
-
-  float XRef, YRef, ZRef;
-  rgbToXyz(rRef, gRef, bRef, XRef, YRef, ZRef);
-
   float LRef, ARef, BRef;
-  xyzToLab(XRef, YRef, ZRef, LRef, ARef, BRef);
-
-  LAB referenceLab = {LRef, ARef, BRef};
-
-  rgb* lineptr = (rgb*)(buffer + y * bpitch);
-  float r = lineptr[x].r;
-  float g = lineptr[x].g;
-  float b = lineptr[x].b;
-
-  float X, Y, Z;
-  rgbToXyz(r, g, b, X, Y, Z);
+  rgb ref_pixel = ((rgb*)(referenceBuffer + y * rpitch))[x];
+  rgbToLab(ref_pixel.r, ref_pixel.g, ref_pixel.b, LRef, ARef, BRef);
 
   float L, A, B;
-  xyzToLab(X, Y, Z, L, A, B);
+  rgb buf_pixel = ((rgb*)(buffer + y * bpitch))[x];
+  rgbToLab(buf_pixel.r, buf_pixel.g, buf_pixel.b, L, A, B);
 
-  LAB currentLab = {L, A, B};
-#define LAB_DISTANCE(lab1, lab2)                                               \
-  (sqrtf(powf((lab1).l - (lab2).l, 2) + powf((lab1).a - (lab2).a, 2)           \
-         + powf((lab1).b - (lab2).b, 2)))
-  float distance = LAB_DISTANCE(currentLab, referenceLab);
-#undef LAB_DISTANCE
-
+  float distance = sqrtf((L - LRef) * (L - LRef) + (A - ARef) * (A - ARef) + (B - BRef) * (B - BRef));
   uint8_t distance8bit =
     static_cast<uint8_t>(fminf(distance / MAX_LAB_DISTANCE * 255.0f, 255.0f));
 
-  lineptr[x].r = distance8bit;
-  lineptr[x].g = distance8bit;
-  lineptr[x].b = distance8bit;
+  ((rgb*)(buffer + y * bpitch))[x] = {distance8bit, distance8bit, distance8bit};
 }
 
 //******************************************************
