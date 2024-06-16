@@ -156,8 +156,8 @@ __global__ void estimate_background_median(_BE_FSIGN)
 
 // Declare all constant variable outsite the kernel for better access time
 __constant__ float D65_XYZ[9] = {0.412453f, 0.357580f, 0.180423f,
-                            0.212671f, 0.715160f, 0.072169f,
-                            0.019334f, 0.119193f, 0.950227f};
+                                 0.212671f, 0.715160f, 0.072169f,
+                                 0.019334f, 0.119193f, 0.950227f};
 
 __constant__ float D65_XN = 0.95047f;
 __constant__ float D65_YN = 1.00000f;
@@ -166,11 +166,9 @@ __constant__ float D65_ZN = 1.08883f;
 __constant__ float EPSILON = 0.008856f;
 __constant__ float KAPPA = 903.3f;
 
-                            
 __device__ void
 rgbToLab(float r, float g, float b, float& l_, float& a_, float& b_)
 {
-
   r = r / 255.0f;
   g = g / 255.0f;
   b = b / 255.0f;
@@ -219,7 +217,8 @@ __global__ void rgbToLabDistanceKernel(std::byte* referenceBuffer,
   rgb buf_pixel = ((rgb*)(buffer + y * bpitch))[x];
   rgbToLab(buf_pixel.r, buf_pixel.g, buf_pixel.b, L, A, B);
 
-  float distance = sqrtf((L - LRef) * (L - LRef) + (A - ARef) * (A - ARef) + (B - BRef) * (B - BRef));
+  float distance = sqrtf((L - LRef) * (L - LRef) + (A - ARef) * (A - ARef)
+                         + (B - BRef) * (B - BRef));
   uint8_t distance8bit =
     static_cast<uint8_t>(fminf(distance / MAX_LAB_DISTANCE * 255.0f, 255.0f));
 
